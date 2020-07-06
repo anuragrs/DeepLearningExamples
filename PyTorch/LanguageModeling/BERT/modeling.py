@@ -40,6 +40,8 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 import torch.nn.init as init
+from transformers import BertConfig as bert_conf
+from transformers import BertPreTrainedModel
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +475,7 @@ class BertEncoder(nn.Module):
     def __init__(self, config):
         super(BertEncoder, self).__init__()
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
-        self.output_all_encoded_layers = config.output_all_encoded_layers
+        self.output_all_encoded_layers = False
         self._checkpoint_activations = False
 
     @torch.jit.unused
@@ -587,170 +589,6 @@ class BertPreTrainingHeads(nn.Module):
         seq_relationship_score = self.seq_relationship(pooled_output)
         return prediction_scores, seq_relationship_score
 
-
-class BertPreTrainedModel(nn.Module):
-    """ An abstract class to handle weights initialization and
-        a simple interface for dowloading and loading pretrained models.
-    """
-    def __init__(self, config, *inputs, **kwargs):
-        super(BertPreTrainedModel, self).__init__()
-        if not isinstance(config, BertConfig):
-            raise ValueError(
-                "Parameter config in `{}(config)` should be an instance of class `BertConfig`. "
-                "To create a model from a Google pretrained model use "
-                "`model = {}.from_pretrained(PRETRAINED_MODEL_NAME)`".format(
-                    self.__class__.__name__, self.__class__.__name__
-                ))
-        self.config = config
-
-    def init_bert_weights(self, module):
-        """ Initialize the weights.
-        """
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-        elif isinstance(module, BertLayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
-
-    def checkpoint_activations(self, val):
-        def _apply_flag(module):
-            if hasattr(module, "_checkpoint_activations"):
-                module._checkpoint_activations=val
-        self.apply(_apply_flag)
-    def enable_apex(self, val):
-        def _apply_flag(module):
-            if hasattr(module, "apex_enabled"):
-                module.apex_enabled=val
-        self.apply(_apply_flag)
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, state_dict=None, cache_dir=None,
-                        from_tf=False, *inputs, **kwargs):
-        """
-        Instantiate a BertPreTrainedModel from a pre-trained model file or a pytorch state dict.
-        Download and cache the pre-trained model file if needed.
-
-        Params:
-            pretrained_model_name_or_path: either:
-                - a str with the name of a pre-trained model to load selected in the list of:
-                    . `bert-base-uncased`
-                    . `bert-large-uncased`
-                    . `bert-base-cased`
-                    . `bert-large-cased`
-                    . `bert-base-multilingual-uncased`
-                    . `bert-base-multilingual-cased`
-                    . `bert-base-chinese`
-                - a path or url to a pretrained model archive containing:
-                    . `bert_config.json` a configuration file for the model
-                    . `pytorch_model.bin` a PyTorch dump of a BertForPreTraining instance
-                - a path or url to a pretrained model archive containing:
-                    . `bert_config.json` a configuration file for the model
-                    . `model.chkpt` a TensorFlow checkpoint
-            from_tf: should we load the weights from a locally saved TensorFlow checkpoint
-            cache_dir: an optional path to a folder in which the pre-trained models will be cached.
-            state_dict: an optional state dictionnary (collections.OrderedDict object) to use instead of Google pre-trained models
-            *inputs, **kwargs: additional input for the specific Bert class
-                (ex: num_labels for BertForSequenceClassification)
-        """
-        if pretrained_model_name_or_path in PRETRAINED_MODEL_ARCHIVE_MAP:
-            archive_file = PRETRAINED_MODEL_ARCHIVE_MAP[pretrained_model_name_or_path]
-        else:
-            archive_file = pretrained_model_name_or_path
-        # redirect to the cache, if necessary
-        try:
-            resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir)
-        except EnvironmentError:
-            logger.error(
-                "Model name '{}' was not found in model name list ({}). "
-                "We assumed '{}' was a path or url but couldn't find any file "
-                "associated to this path or url.".format(
-                    pretrained_model_name_or_path,
-                    ', '.join(PRETRAINED_MODEL_ARCHIVE_MAP.keys()),
-                    archive_file))
-            return None
-        if resolved_archive_file == archive_file:
-            logger.info("loading archive file {}".format(archive_file))
-        else:
-            logger.info("loading archive file {} from cache at {}".format(
-                archive_file, resolved_archive_file))
-        tempdir = None
-        if os.path.isdir(resolved_archive_file) or from_tf:
-            serialization_dir = resolved_archive_file
-        else:
-            # Extract archive to temp dir
-            tempdir = tempfile.mkdtemp()
-            logger.info("extracting archive file {} to temp dir {}".format(
-                resolved_archive_file, tempdir))
-            with tarfile.open(resolved_archive_file, 'r:gz') as archive:
-                archive.extractall(tempdir)
-            serialization_dir = tempdir
-        # Load config
-        config_file = os.path.join(serialization_dir, CONFIG_NAME)
-        config = BertConfig.from_json_file(config_file)
-        logger.info("Model config {}".format(config))
-        # Instantiate model.
-        model = cls(config, *inputs, **kwargs)
-        if state_dict is None and not from_tf:
-            weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
-            state_dict = torch.load(weights_path, map_location='cpu' if not torch.cuda.is_available() else None)
-        if tempdir:
-            # Clean up temp dir
-            shutil.rmtree(tempdir)
-        if from_tf:
-            # Directly load from a TensorFlow checkpoint
-            weights_path = os.path.join(serialization_dir, TF_WEIGHTS_NAME)
-            return load_tf_weights_in_bert(model, weights_path)
-        # Load from a PyTorch state_dict
-        old_keys = []
-        new_keys = []
-        for key in state_dict.keys():
-            new_key = None
-            if 'gamma' in key:
-                new_key = key.replace('gamma', 'weight')
-            if 'beta' in key:
-                new_key = key.replace('beta', 'bias')
-            if new_key:
-                old_keys.append(key)
-                new_keys.append(new_key)
-        for old_key, new_key in zip(old_keys, new_keys):
-            state_dict[new_key] = state_dict.pop(old_key)
-
-        missing_keys = []
-        unexpected_keys = []
-        error_msgs = []
-        # copy state_dict so _load_from_state_dict can modify it
-        metadata = getattr(state_dict, '_metadata', None)
-        state_dict = state_dict.copy()
-        if metadata is not None:
-            state_dict._metadata = metadata
-
-        def load(module, prefix=''):
-            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
-            module._load_from_state_dict(
-                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
-            for name, child in module._modules.items():
-                if child is not None:
-                    load(child, prefix + name + '.')
-        start_prefix = ''
-        if not hasattr(model, 'bert') and any(s.startswith('bert.') for s in state_dict.keys()):
-            start_prefix = 'bert.'
-        load(model, prefix=start_prefix)
-        if len(missing_keys) > 0:
-            logger.info("Weights of {} not initialized from pretrained model: {}".format(
-                model.__class__.__name__, missing_keys))
-        if len(unexpected_keys) > 0:
-            logger.info("Weights from pretrained model not used in {}: {}".format(
-                model.__class__.__name__, unexpected_keys))
-        if len(error_msgs) > 0:
-            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
-                               model.__class__.__name__, "\n\t".join(error_msgs)))
-        return model
-
-
 class BertModel(BertPreTrainedModel):
     """BERT model ("Bidirectional Embedding Representations from a Transformer").
 
@@ -799,8 +637,8 @@ class BertModel(BertPreTrainedModel):
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
-        self.apply(self.init_bert_weights)
-        self.output_all_encoded_layers = config.output_all_encoded_layers
+        self.apply(self._init_weights)
+        self.output_all_encoded_layers = False
 
     def forward(self, input_ids, token_type_ids, attention_mask):
         # We create a 3D attention mask from a 2D tensor mask.
@@ -825,71 +663,6 @@ class BertModel(BertPreTrainedModel):
         if not self.output_all_encoded_layers:
             encoded_layers = encoded_layers[-1:]
         return encoded_layers, pooled_output
-
-
-class BertForPreTraining(BertPreTrainedModel):
-    """BERT model with pre-training heads.
-    This module comprises the BERT model followed by the two pre-training heads:
-        - the masked language modeling head, and
-        - the next sentence classification head.
-
-    Params:
-        config: a BertConfig class instance with the configuration to build a new model.
-
-    Inputs:
-        `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
-            with the word token indices in the vocabulary(see the tokens preprocessing logic in the scripts
-            `extract_features.py`, `run_classifier.py` and `run_squad.py`)
-        `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token
-            types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to
-            a `sentence B` token (see BERT paper for more details).
-        `attention_mask`: an optional torch.LongTensor of shape [batch_size, sequence_length] with indices
-            selected in [0, 1]. It's a mask to be used if the input sequence length is smaller than the max
-            input sequence length in the current batch. It's the mask that we typically use for attention when
-            a batch has varying length sentences.
-        `masked_lm_labels`: optional masked language modeling labels: torch.LongTensor of shape [batch_size, sequence_length]
-            with indices selected in [-1, 0, ..., vocab_size]. All labels set to -1 are ignored (masked), the loss
-            is only computed for the labels set in [0, ..., vocab_size]
-        `next_sentence_label`: optional next sentence classification loss: torch.LongTensor of shape [batch_size]
-            with indices selected in [0, 1].
-            0 => next sentence is the continuation, 1 => next sentence is a random sentence.
-
-    Outputs:
-        if `masked_lm_labels` and `next_sentence_label` are not `None`:
-            Outputs the total_loss which is the sum of the masked language modeling loss and the next
-            sentence classification loss.
-        if `masked_lm_labels` or `next_sentence_label` is `None`:
-            Outputs a tuple comprising
-            - the masked language modeling logits of shape [batch_size, sequence_length, vocab_size], and
-            - the next sentence classification logits of shape [batch_size, 2].
-
-    Example usage:
-    ```python
-    # Already been converted into WordPiece token ids
-    input_ids = torch.LongTensor([[31, 51, 99], [15, 5, 0]])
-    input_mask = torch.LongTensor([[1, 1, 1], [1, 1, 0]])
-    token_type_ids = torch.LongTensor([[0, 0, 1], [0, 1, 0]])
-
-    config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
-        num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
-
-    model = BertForPreTraining(config)
-    masked_lm_logits_scores, seq_relationship_logits = model(input_ids, token_type_ids, input_mask)
-    ```
-    """
-    def __init__(self, config):
-        super(BertForPreTraining, self).__init__(config)
-        self.bert = BertModel(config)
-        self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings.weight)
-        self.apply(self.init_bert_weights)
-
-    def forward(self, input_ids, token_type_ids, attention_mask):
-        encoded_layers, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
-        sequence_output = encoded_layers[-1]
-        prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
-
-        return prediction_scores, seq_relationship_score
-
 
 class BertForMaskedLM(BertPreTrainedModel):
     """BERT model with the masked language modeling head.
@@ -937,7 +710,7 @@ class BertForMaskedLM(BertPreTrainedModel):
         super(BertForMaskedLM, self).__init__(config)
         self.bert = BertModel(config)
         self.cls = BertOnlyMLMHead(config, self.bert.embeddings.word_embeddings.weight)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None):
         encoded_layers, _ = self.bert(input_ids, token_type_ids, attention_mask)
@@ -999,7 +772,7 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
         super(BertForNextSentencePrediction, self).__init__(config)
         self.bert = BertModel(config)
         self.cls = BertOnlyNSPHead(config)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, next_sentence_label=None):
         _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
@@ -1064,7 +837,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, num_labels)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
@@ -1129,7 +902,7 @@ class BertForMultipleChoice(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         flat_input_ids = input_ids.view(-1, input_ids.size(-1))
@@ -1199,7 +972,7 @@ class BertForTokenClassification(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, num_labels)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         encoded_layers, _ = self.bert(input_ids, token_type_ids, attention_mask)
@@ -1266,7 +1039,7 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         # TODO check with Google if it's normal there is no dropout on the token classifier of SQuAD in the TF version
         # self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.qa_outputs = nn.Linear(config.hidden_size, 2)
-        self.apply(self.init_bert_weights)
+        self.apply(self._init_weights)
 
     def forward(self, input_ids, token_type_ids, attention_mask):
         encoded_layers, _ = self.bert(input_ids, token_type_ids, attention_mask)

@@ -54,6 +54,9 @@ from apex.amp import _amp_state
 import dllogger
 from concurrent.futures import ProcessPoolExecutor
 
+from transformers import BertConfig as bert_conf
+from transformers import BertForPreTraining
+
 torch._C._jit_set_profiling_mode(False)
 torch._C._jit_set_profiling_executor(False)
 
@@ -107,6 +110,7 @@ class pretraining_dataset(Dataset):
 
         return [input_ids, segment_ids, input_mask,
                 masked_lm_labels, next_sentence_labels]
+
 class BertPretrainingCriterion(torch.nn.Module):
     def __init__(self, vocab_size):
         super(BertPretrainingCriterion, self).__init__()
@@ -307,14 +311,13 @@ def setup_training(args):
 def prepare_model_and_optimizer(args, device):
 
     # Prepare model
-    config = modeling.BertConfig.from_json_file(args.config_file)
-
+    config = bert_conf.from_json_file(args.config_file)
     # Padding for divisibility by 8
     if config.vocab_size % 8 != 0:
         config.vocab_size += 8 - (config.vocab_size % 8)
 
     modeling.ACT2FN["bias_gelu"] = torch.jit.script(modeling.ACT2FN["bias_gelu"])
-    model = modeling.BertForPreTraining(config)
+    model = BertForPreTraining(config)
 
     checkpoint = None
     if not args.resume_from_checkpoint:
@@ -359,7 +362,7 @@ def prepare_model_and_optimizer(args, device):
             model, optimizer = amp.initialize(model, optimizer, opt_level="O2", loss_scale=args.loss_scale, cast_model_outputs=torch.float16)
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
-    model.checkpoint_activations(args.checkpoint_activations)
+    # model.checkpoint_activations(args.checkpoint_activations)
 
     if args.resume_from_checkpoint:
         if args.phase2 or args.init_checkpoint:
@@ -551,7 +554,9 @@ def main():
                     training_steps += 1
                     batch = [t.to(device) for t in batch]
                     input_ids, segment_ids, input_mask, masked_lm_labels, next_sentence_labels = batch
-                    prediction_scores, seq_relationship_score = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
+                    output = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
+                    # print ("Output is : {}".format(output))
+                    prediction_scores, seq_relationship_score = output
                     loss = criterion(prediction_scores, seq_relationship_score, masked_lm_labels, next_sentence_labels)
                     if args.n_gpu > 1:
                         loss = loss.mean()  # mean() to average on multi-gpu.
