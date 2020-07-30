@@ -18,16 +18,11 @@ rm -rf /results
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-mpirun \
+/opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output \
     -np 8 \
-    -H localhost:8 \
-    -bind-to none \
-    -map-by slot \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
-    -mca pml ob1 -mca btl ^openib \
-    --allow-run-as-root \
     python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --checkpoint="/model/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -36,7 +31,7 @@ mpirun \
         --learning_rate_steps="30000,40000" \
         --model_dir="/results/" \
         --num_steps_per_eval=3696 \
-        --total_steps=45000 \
+        --total_steps=1000 \
         --train_batch_size=4 \
         --eval_batch_size=8 \
         --training_file_pattern="/data/train*.tfrecord" \
