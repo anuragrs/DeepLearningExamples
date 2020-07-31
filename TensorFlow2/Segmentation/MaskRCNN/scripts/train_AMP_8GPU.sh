@@ -21,10 +21,12 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     -np 8 \
     --mca btl_tcp_if_exclude lo,docker0 \
+    --hostfile /shared/hosts \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
     --oversubscribe \
+    bash launcher.sh \
     /shared/conda/bin/python ${BASEDIR}/../mask_rcnn_main.py \
         --mode="train_and_eval" \
         --checkpoint="/shared/model/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
@@ -33,7 +35,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --learning_rate_steps="30000,40000" \
         --model_dir="/shared/results/" \
         --num_steps_per_eval=3696 \
-        --total_steps=1000 \
+        --total_steps=2000 \
         --train_batch_size=4 \
         --eval_batch_size=8 \
         --training_file_pattern="/shared/data/train*.tfrecord" \
