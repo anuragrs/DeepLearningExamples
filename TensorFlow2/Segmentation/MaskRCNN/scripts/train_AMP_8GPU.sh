@@ -19,9 +19,9 @@ rm -rf /shared/results
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
-    -np 8 \
     --mca btl_tcp_if_exclude lo,docker0 \
     --hostfile /shared/hosts \
+    -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
     -x PATH \
@@ -32,7 +32,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --checkpoint="/shared/model/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
         --init_learning_rate=0.04 \
-        --learning_rate_steps="3750, 5000" \
+        --learning_rate_steps="3750,5000" \
         --model_dir="/shared/results/" \
         --num_steps_per_eval=462 \
         --total_steps=5625 \
