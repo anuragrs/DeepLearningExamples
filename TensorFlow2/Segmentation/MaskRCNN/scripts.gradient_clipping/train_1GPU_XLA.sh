@@ -22,7 +22,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 python ${BASEDIR}/../mask_rcnn_main.py \
     --mode="train_and_eval" \
-    --checkpoint="/model/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
+    --checkpoint="/model/resnet/resnet-nhwc-2018-10-14/model.ckpt-112602" \
     --eval_samples=5000 \
     --init_learning_rate=0.005 \
     --learning_rate_steps="240000,320000" \
@@ -34,7 +34,7 @@ python ${BASEDIR}/../mask_rcnn_main.py \
     --training_file_pattern="/data/train*.tfrecord" \
     --validation_file_pattern="/data/val*.tfrecord" \
     --val_json_file="/data/annotations/instances_val2017.json" \
-    --amp \
+    --noamp \
     --use_batched_nms \
     --xla \
     --nouse_custom_box_proposals_op

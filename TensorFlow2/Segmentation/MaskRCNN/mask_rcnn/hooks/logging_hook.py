@@ -32,7 +32,7 @@ from mask_rcnn.utils.decorators import atexit_hook
 
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_rank_and_size
-from mask_rcnn.utils.distributed_utils import MPI_size
+from mask_rcnn.utils.distributed_utils import MPI_size, MPI_rank
 
 from mask_rcnn.utils.logging_backend import LoggingBackend
 from mask_rcnn.utils.logging_backend import RuntimeMode
@@ -389,7 +389,7 @@ def real_autologging_hook(*args, **kwargs):
     replica_id = tf.distribute.get_replica_context().replica_id_in_sync_group
 
     # Do not set a logging hook for GPUs != 0
-    if MPI_rank_and_size()[0] != 0 or (isinstance(replica_id, tf.Tensor) and tf.get_static_value(replica_id) != 0):
+    if MPI_rank() != 0 or (isinstance(replica_id, tf.Tensor) and tf.get_static_value(replica_id) != 0):
         return _SlaveGPUsHook()
 
     else:

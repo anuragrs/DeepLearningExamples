@@ -467,6 +467,11 @@ def _model_fn(features, labels, mode, params):
         grads_and_vars = optimizer.compute_gradients(total_loss, trainable_variables, colocate_gradients_with_ops=True)
 
         gradients, variables = zip(*grads_and_vars)
+
+        all_are_finite = tf.reduce_all([tf.reduce_all(tf.math.is_finite(g)) for g in gradients])
+        (clipped_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=3.0,
+                                use_norm=tf.cond(all_are_finite, lambda: tf.linalg.global_norm(gradients), lambda: tf.constant(1.0)))
+        gradients = clipped_grads
         grads_and_vars = []
 
         # Special treatment for biases (beta is named as bias in reference model)
