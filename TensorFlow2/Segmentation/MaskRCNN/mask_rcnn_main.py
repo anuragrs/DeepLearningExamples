@@ -88,6 +88,7 @@ def main(argv):
     ]
     temp_config['learning_rate_steps'] = [int(step) for step in temp_config['learning_rate_steps']]
 
+
     RUN_CONFIG = params_io.override_hparams(RUN_CONFIG, temp_config)
     # ============================ Configure parameters ============================ #
 

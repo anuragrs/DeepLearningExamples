@@ -37,14 +37,6 @@ wget -N ${BASE_URL}/model.ckpt-112603.data-00000-of-00001 -P ${DEST_DIR}
 wget -N ${BASE_URL}/model.ckpt-112603.index  -P ${DEST_DIR}
 wget -N ${BASE_URL}/model.ckpt-112603.meta -P ${DEST_DIR}
 
-## ====================== resnet-nhwc-2018-10-14 ====================== ##
-#BASE_URL="https://storage.googleapis.com/cloud-tpu-artifacts/resnet/resnet-nhwc-2018-10-14"
-#DEST_DIR="resnet/resnet-nhwc-2018-10-14"
-#
-#wget -N ${BASE_URL}/model.ckpt-112602.data-00000-of-00001 -P ${DEST_DIR}
-#wget -N ${BASE_URL}/model.ckpt-112602.index -P ${DEST_DIR}
-#wget -N ${BASE_URL}/model.ckpt-112602.meta -P ${DEST_DIR}
-
 # VERIFY CHECKPOINTS
 echo "Verifying and Processing Checkpoints..."
 
@@ -63,9 +55,6 @@ python inspect_checkpoint.py --file_name=mask-rcnn/1555659850/ckpt/model.ckpt \
 
 python inspect_checkpoint.py --file_name=resnet/resnet-nhwc-2018-02-07/model.ckpt-112603 \
     > resnet/resnet-nhwc-2018-02-07/tensors_and_shape.txt
-
-#python inspect_checkpoint.py --file_name=resnet/resnet-nhwc-2018-10-14/model.ckpt-112602 \
-#    > resnet/resnet-nhwc-2018-10-14/tensors_and_shape.txt
 
 python inspect_checkpoint.py --file_name=resnet/extracted_from_maskrcnn/resnet50.ckpt \
     > resnet/extracted_from_maskrcnn/tensors_and_shape.txt

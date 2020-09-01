@@ -50,16 +50,19 @@ from mask_rcnn.hooks import CheckpointSaverHook
 from mask_rcnn.hooks import PretrainedWeightsLoadingHook
 
 
-def get_training_hooks(mode, model_dir, checkpoint_path=None, skip_checkpoint_variables=None):
+def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None, skip_checkpoint_variables=None):
 
     assert mode in ('train', 'eval')
+    model_dir=runtime_config.model_dir
+    checkpoint_path=runtime_config.checkpoint
+    skip_checkpoint_variables=runtime_config.skip_checkpoint_variables
 
     training_hooks = [
         AutoLoggingHook(
-            # log_every_n_steps=RUNNING_CONFIG.display_step,
-            log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
-            # warmup_steps=RUNNING_CONFIG.warmup_steps,
-            warmup_steps=100,
+            log_every_n_steps=5,
+            #log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
+            warmup_steps=runtime_config.warmup_steps,
+            #warmup_steps=100,
             is_training=True
         )
     ]
@@ -297,9 +300,10 @@ class BaseExecuter(object):
         max_steps=self._runtime_config.total_steps,
         hooks=get_training_hooks(
             mode="train",
-            model_dir=self._runtime_config.model_dir,
-            checkpoint_path=self._runtime_config.checkpoint,
-            skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
+            runtime_cfg=self._runtime_config,
+#            model_dir=self._runtime_config.model_dir,
+#            checkpoint_path=self._runtime_config.checkpoint,
+#            skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
         )
     )
 
@@ -352,9 +356,10 @@ class BaseExecuter(object):
 
     training_hooks = get_training_hooks(
         mode="train",
-        model_dir=self._runtime_config.model_dir,
-        checkpoint_path=self._runtime_config.checkpoint,
-        skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
+        runtime_config=self._runtime_config
+#        model_dir=self._runtime_config.model_dir,
+#        checkpoint_path=self._runtime_config.checkpoint,
+#        skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
     )
 
     for cycle in range(1, num_cycles + 1):

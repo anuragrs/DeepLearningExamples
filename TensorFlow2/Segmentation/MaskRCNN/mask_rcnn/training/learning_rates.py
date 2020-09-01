@@ -53,3 +53,35 @@ def step_learning_rate_with_linear_warmup(
 
     return learning_rate
 
+
+def cosine_learning_rate_with_linear_warmup(
+    global_step,
+    init_learning_rate,
+    warmup_learning_rate,
+    warmup_steps,
+    first_decay_steps,
+    alpha=0.0
+):
+    """Creates the step learning rate tensor with linear warmup."""
+
+    def warmup_lr_fn():
+        return warmup_learning_rate + \
+            tf.cast(global_step, dtype=tf.float32) / warmup_steps * (init_learning_rate - warmup_learning_rate)
+
+    def learning_rate_fn():
+        return tf.compat.v1.train.cosine_decay_restarts(
+            init_learning_rate,
+            global_step,
+            first_decay_steps,
+            alpha=alpha
+        )
+
+    learning_rate = tf.where(
+        global_step < warmup_steps,
+        warmup_lr_fn(),
+        learning_rate_fn()
+    )
+
+    return learning_rate
+
+

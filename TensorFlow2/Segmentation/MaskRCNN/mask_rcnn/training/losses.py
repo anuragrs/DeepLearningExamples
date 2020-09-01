@@ -35,6 +35,21 @@ else:
     ReductionV2 = tf.keras.losses.Reduction
 
 
+def _l1_loss(y_true, y_pred, weights):
+    keras_l1 = tf.keras.losses.MeanAbsoluteError(reduction=ReductionV2.SUM)
+
+    if LooseVersion(tf.__version__) >= LooseVersion("2.2.0"):
+        y_true = tf.expand_dims(y_true, axis=-1)
+        y_pred = tf.expand_dims(y_pred, axis=-1)
+
+    l1_loss = keras_l1(y_true, y_pred, sample_weight=weights)
+    assert l1_loss.dtype == tf.float32
+    num_non_zeros = tf.math.count_nonzero(weights, dtype=tf.float32)
+    loss = tf.math.divide_no_nan(l1_loss, num_non_zeros, name="l1_loss")
+    assert loss.dtype == tf.float32
+    return l1_loss
+
+
 def _huber_loss(y_true, y_pred, weights, delta):
 
     num_non_zeros = tf.math.count_nonzero(weights, dtype=tf.float32)
