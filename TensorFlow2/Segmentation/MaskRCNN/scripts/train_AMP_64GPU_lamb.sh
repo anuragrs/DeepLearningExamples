@@ -14,13 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-rm -rf /shared/results
+rm -rf /shared/results_8x
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 /opt/amazon/openmpi/bin/mpirun --allow-run-as-root --tag-output --mca plm_rsh_no_tree_spawn 1 \
     --mca btl_tcp_if_exclude lo,docker0 \
-    --hostfile /shared/hostfiles/hosts_32x \
+    --hostfile /shared/hostfiles/hosts_8x \
     -N 8 \
     -x NCCL_DEBUG=VERSION \
     -x LD_LIBRARY_PATH \
@@ -31,18 +31,15 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --mode="train_and_eval" \
         --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --init_learning_rate=0.0025 \
-        --learning_rate_steps="3733,5133" \
+        --init_learning_rate=0.032 \
 	--optimizer_type="LAMB" \
-        --lr_schedule="piecewise" \
-        --model_dir="/shared/results/" \
-        --num_steps_per_eval=8000 \
-	--warmup_learning_rate=0.00133 \
-	--warmup_steps=150 \
-	--global_gradient_clip_ratio=5.0 \
+	--lr_schedule="piecewise" \
+        --learning_rate_steps="3733,5133" \
+        --model_dir="/shared/results_8x/" \
+        --num_steps_per_eval=462 \
         --total_steps=5600 \
+        --train_batch_size=4 \
 	--l2_weight_decay=1e-4 \
-        --train_batch_size=1 \
         --eval_batch_size=8 \
         --training_file_pattern="/shared/data/coco/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/shared/data/coco/nv_tfrecords/val*.tfrecord" \
@@ -52,7 +49,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --xla \
         --use_custom_box_proposals_op
 #        --nouse_custom_box_proposals_op
-# 3733
+
 
 
 #BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"

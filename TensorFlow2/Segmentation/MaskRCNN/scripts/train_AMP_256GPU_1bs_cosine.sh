@@ -31,16 +31,14 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --mode="train_and_eval" \
         --checkpoint="/shared/DeepLearningExamples/TensorFlow2/Segmentation/MaskRCNN/weights/resnet/resnet-nhwc-2018-02-07/model.ckpt-112603" \
         --eval_samples=5000 \
-        --init_learning_rate=0.0025 \
-        --learning_rate_steps="3733,5133" \
-	--optimizer_type="LAMB" \
-        --lr_schedule="piecewise" \
+        --init_learning_rate=0.24 \
+        --learning_rate_steps="4650,6000" \
         --model_dir="/shared/results/" \
         --num_steps_per_eval=8000 \
-	--warmup_learning_rate=0.00133 \
-	--warmup_steps=150 \
-	--global_gradient_clip_ratio=5.0 \
-        --total_steps=5600 \
+	--warmup_learning_rate=0.000133 \
+	--warmup_steps=1000 \
+	--global_gradient_clip_ratio=3.0 \
+        --total_steps=6500 \
 	--l2_weight_decay=1e-4 \
         --train_batch_size=1 \
         --eval_batch_size=8 \
@@ -52,7 +50,7 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --xla \
         --use_custom_box_proposals_op
 #        --nouse_custom_box_proposals_op
-# 3733
+
 
 
 #BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"

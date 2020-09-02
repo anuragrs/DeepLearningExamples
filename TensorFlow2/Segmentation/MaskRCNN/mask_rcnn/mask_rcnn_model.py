@@ -114,7 +114,7 @@ def create_lamb_optimizer(learning_rate, params):
 
     if params["amp"]:
         loss_scale = tf.train.experimental.DynamicLossScale(
-            initial_loss_scale=128.0, #(2 ** 12),
+            initial_loss_scale=(2 ** 12),
             increment_period=2000,
             multiplier=2.0
         )
