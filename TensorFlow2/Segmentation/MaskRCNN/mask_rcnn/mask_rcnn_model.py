@@ -157,7 +157,8 @@ def build_model_graph(features, labels, is_training, params):
         "resnet50",
         data_format='channels_last',
         trainable=is_training,
-        finetune_bn=params['finetune_bn']
+        finetune_bn=params['finetune_bn'],
+        norm_type='batchnorm'
     )
 
     backbone_feats = MODELS["backbone"](

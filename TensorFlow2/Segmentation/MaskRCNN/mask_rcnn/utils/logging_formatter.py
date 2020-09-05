@@ -190,8 +190,10 @@ class _Logger(object):
 
         self.old_warnings_showwarning = None
 
-        if MPI_rank_and_size()[0] == 0:
-            self._define_logger()
+#        if MPI_rank_and_size()[0] == 0:
+#            self._define_logger()
+        self._define_logger() # AS: define logger for all workers for debugging
+
 
     def _define_logger(self):
 

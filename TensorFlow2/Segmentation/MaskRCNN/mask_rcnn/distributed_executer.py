@@ -35,7 +35,7 @@ from mask_rcnn.utils.logging_formatter import logging
 
 from mask_rcnn.utils.distributed_utils import MPI_is_distributed
 from mask_rcnn.utils.distributed_utils import MPI_local_rank
-from mask_rcnn.utils.distributed_utils import MPI_rank
+from mask_rcnn.utils.distributed_utils import MPI_rank, MPI_size
 
 from mask_rcnn.hooks.logging_hook import AutoLoggingHook
 
@@ -301,9 +301,6 @@ class BaseExecuter(object):
         hooks=get_training_hooks(
             mode="train",
             runtime_cfg=self._runtime_config,
-#            model_dir=self._runtime_config.model_dir,
-#            checkpoint_path=self._runtime_config.checkpoint,
-#            skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
         )
     )
 
@@ -350,6 +347,7 @@ class BaseExecuter(object):
     train_estimator = self.build_mask_rcnn_estimator(train_params, train_run_config, 'train')
 
     eval_estimator = None
+    local_eval_results = None
     eval_results = None
 
     num_cycles = math.ceil(self._runtime_config.total_steps / self._runtime_config.num_steps_per_eval)
@@ -357,9 +355,6 @@ class BaseExecuter(object):
     training_hooks = get_training_hooks(
         mode="train",
         runtime_config=self._runtime_config
-#        model_dir=self._runtime_config.model_dir,
-#        checkpoint_path=self._runtime_config.checkpoint,
-#        skip_checkpoint_variables=self._runtime_config.skip_checkpoint_variables
     )
 
     for cycle in range(1, num_cycles + 1):
@@ -383,7 +378,7 @@ class BaseExecuter(object):
           profiler_context_manager = lambda *args, **kwargs: suppress()  # No-Op context manager
 
       with profiler_context_manager(
-              '/workspace/profiling/',
+              '/shared/profiling/',
               trace_steps=range(100, 200, 3),
               dump_steps=[200]
       ) as pctx:
@@ -399,12 +394,29 @@ class BaseExecuter(object):
           )
 
       if not MPI_is_distributed() or MPI_rank() == 0:
-
           print()  # Visual Spacing
           logging.info("=================================")
           logging.info('    Start evaluation cycle %02d' % cycle)
           logging.info("=================================\n")
+      if not self._runtime_config.dist_eval:
+          if not MPI_is_distributed() or MPI_rank() == 0:
+              if eval_estimator is None:
+                  eval_run_config = self.build_strategy_configuration('eval')
+                  eval_params = self.build_model_parameters('eval')
+                  eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
+              last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+              logging.info("Restoring parameters from %s\n" % last_ckpt)
+              eval_results, predictions = evaluation.evaluate(
+                  eval_estimator,
+                  eval_input_fn,
+                  self._runtime_config.eval_samples,
+                  self._runtime_config.eval_batch_size,
+                  self._runtime_config.include_mask,
+                  self._runtime_config.val_json_file,
+                  report_frequency=self._runtime_config.report_frequency
+              )
+      else:
           if eval_estimator is None:
               eval_run_config = self.build_strategy_configuration('eval')
               eval_params = self.build_model_parameters('eval')
@@ -412,17 +424,18 @@ class BaseExecuter(object):
 
           last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
           logging.info("Restoring parameters from %s\n" % last_ckpt)
-
           eval_results, predictions = evaluation.evaluate(
               eval_estimator,
               eval_input_fn,
-              self._runtime_config.eval_samples,
+              self._runtime_config.eval_samples // MPI_size(), # divide 5000 by world size
               self._runtime_config.eval_batch_size,
               self._runtime_config.include_mask,
               self._runtime_config.val_json_file,
-              report_frequency=self._runtime_config.report_frequency
+              report_frequency=self._runtime_config.report_frequency,
+              do_distributed=True
           )
 
+      if not MPI_is_distributed() or MPI_rank() == 0:
           self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
       if MPI_is_distributed():

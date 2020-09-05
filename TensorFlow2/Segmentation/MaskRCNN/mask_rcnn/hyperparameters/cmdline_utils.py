@@ -65,6 +65,13 @@ def define_hparams_flags():
         )
     )
 
+    flags.DEFINE_bool(
+        'dist_eval',
+        default=False,
+        help=('If set then distribute evaluation amongst all workers'
+        )
+    )
+
     # Gradient clipping is a fairly coarse heuristic to stabilize training.
     # This model clips the gradient by its L2 norm globally (i.e., across
     # all variables), using a threshold obtained from multiplying this

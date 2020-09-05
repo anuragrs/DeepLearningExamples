@@ -26,6 +26,7 @@ import operator
 import pprint
 import six
 import time
+import itertools
 
 import io
 from PIL import Image
@@ -39,6 +40,7 @@ from mask_rcnn import coco_metric
 from mask_rcnn.utils import coco_utils
 
 from mask_rcnn.object_detection import visualization_utils
+from mask_rcnn.utils.distributed_utils import MPI_rank
 
 import dllogger
 from dllogger import Verbosity
@@ -65,7 +67,111 @@ def process_prediction_for_eval(prediction):
     return prediction
 
 
-def compute_coco_eval_metric(predictor,
+def get_predictions(predictor,
+                    num_batches=-1,
+                    eval_batch_size=-1):
+
+    predictions = dict()
+    batch_idx = 0
+
+
+    while num_batches < 0 or batch_idx < num_batches:
+
+        try:
+            step_t0 = time.time()
+            step_predictions = six.next(predictor)
+            batch_time = time.time() - step_t0
+
+            throughput = eval_batch_size / batch_time
+
+            logging.info('Running inference on batch %03d/%03d... - Step Time: %.4fs - Throughput: %.1f imgs/s' % (
+                batch_idx + 1,
+                num_batches,
+                batch_time,
+                throughput
+            ))
+
+        except StopIteration:
+            logging.info('Get StopIteration at %d batch.' % (batch_idx + 1))
+            break
+
+        step_predictions = process_prediction_for_eval(step_predictions)
+
+        for k, v in step_predictions.items():
+
+            if k not in predictions:
+                predictions[k] = [v]
+
+            else:
+                predictions[k].append(v)
+
+        batch_idx = batch_idx + 1
+
+    return predictions
+
+
+
+def compute_coco_eval_metric_n(predictions,
+                             include_mask=True,
+                             annotation_json_file=""):
+    """Compute COCO eval metric given a predictions.
+    """
+
+    if annotation_json_file == "":
+        annotation_json_file = None
+
+    use_groundtruth_from_json = (annotation_json_file is not None)
+    batch_idx = 0
+
+    if use_groundtruth_from_json:
+        eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
+    else:
+        eval_metric = coco_metric.EvaluationMetric(filename=None, include_mask=include_mask)
+
+    def evaluation_preds(preds):
+
+        # Essential to avoid modifying the source dict
+        _preds = copy.deepcopy(preds)
+        for k in _preds:
+            logging.info('before '+ k)
+            logging.info(len(_preds[k]))
+
+        for k, v in six.iteritems(_preds):
+            _preds[k] = np.concatenate(_preds[k], axis=0)
+
+        for k in _preds:
+            logging.info('after '+ k)
+            logging.info(len(_preds[k]))
+
+
+        if 'orig_images' in _preds and _preds['orig_images'].shape[0] > 10:
+            # Only samples a few images for visualization.
+            _preds['orig_images'] = _preds['orig_images'][:10]
+
+        if use_groundtruth_from_json:
+            eval_results = eval_metric.predict_metric_fn(_preds)
+
+        else:
+            images, annotations = coco_utils.extract_coco_groundtruth(_preds, include_mask)
+            coco_dataset = coco_utils.create_coco_format_dataset(images, annotations)
+            eval_results = eval_metric.predict_metric_fn(_preds, groundtruth_data=coco_dataset)
+
+        return eval_results
+
+    eval_results = evaluation_preds(preds=predictions)
+    logging.info("==================== Metrics ====================")
+
+    # logging.info('Eval Epoch results: %s' % pprint.pformat(eval_results, indent=4))
+    for key, value in sorted(eval_results.items(), key=operator.itemgetter(0)):
+        logging.info("%s: %.9f" % (key, value))
+    print()  # Visual Spacing
+    return eval_results
+
+
+
+
+
+def compute_coco_eval_metric_1(predictor,
                              num_batches=-1,
                              include_mask=True,
                              annotation_json_file="",
@@ -95,7 +201,6 @@ def compute_coco_eval_metric(predictor,
 
     if use_groundtruth_from_json:
         eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
-
     else:
         eval_metric = coco_metric.EvaluationMetric(filename=None, include_mask=include_mask)
 
@@ -104,8 +209,16 @@ def compute_coco_eval_metric(predictor,
         # Essential to avoid modifying the source dict
         _preds = copy.deepcopy(preds)
 
+        for k in _preds:
+            logging.info('before '+ k)
+            logging.info(len(_preds[k]))
+
         for k, v in six.iteritems(_preds):
             _preds[k] = np.concatenate(_preds[k], axis=0)
+
+        for k in _preds:
+            logging.info('after '+ k)
+            logging.info(len(_preds[k]))
 
         if 'orig_images' in _preds and _preds['orig_images'].shape[0] > 10:
             # Only samples a few images for visualization.
@@ -219,8 +332,14 @@ def compute_coco_eval_metric(predictor,
     for key, value in sorted(eval_results.items(), key=operator.itemgetter(0)):
         logging.info("%s: %.9f" % (key, value))
     print()  # Visual Spacing
-
     return eval_results, predictions
+
+
+def gather_result_from_all_processes(local_results, root=0):
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    res = comm.gather(local_results,root=root)
+    return res
 
 
 def evaluate(eval_estimator,
@@ -229,7 +348,8 @@ def evaluate(eval_estimator,
              eval_batch_size,
              include_mask=True,
              validation_json_file="",
-             report_frequency=None):
+             report_frequency=None,
+             do_distributed=False):
 
     """Runs COCO evaluation once."""
     predictor = eval_estimator.predict(
@@ -241,16 +361,49 @@ def evaluate(eval_estimator,
     num_eval_times = num_eval_samples // eval_batch_size
     assert num_eval_times > 0, 'num_eval_samples must be >= eval_batch_size!'
 
-    eval_results, predictions = compute_coco_eval_metric(
-        predictor,
-        num_eval_times,
-        include_mask,
-        validation_json_file,
-        eval_batch_size=eval_batch_size,
-        report_frequency=report_frequency
-    )
+    if do_distributed:
+        worker_predictions = get_predictions(predictor,
+            num_batches=num_eval_times,
+            eval_batch_size=eval_batch_size)
 
-    return eval_results, predictions
+
+        for k in worker_predictions:
+            logging.info(k)
+            logging.info(len(worker_predictions[k]))
+
+        # gather on rank 0
+        predictions_list = gather_result_from_all_processes(worker_predictions)
+
+        if MPI_rank() == 0:    
+            all_predictions = {}
+            for i, p in enumerate(predictions_list):
+                if p:
+                    for k in p:
+                        if k in all_predictions:
+                            all_predictions[k].extend(p[k])
+                        else:
+                            all_predictions[k] = p[k]
+            for k in all_predictions:
+                logging.info(k)
+                logging.info(len(all_predictions[k]))
+            # run metric calculation on root node TODO: launch this in it's own thread
+            eval_results = compute_coco_eval_metric_n(
+                all_predictions,
+                include_mask,
+                validation_json_file)
+            return eval_results, all_predictions
+        return {}, {}
+    else:
+        eval_results, predictions = compute_coco_eval_metric_1(
+            predictor,
+            num_eval_times,
+            include_mask,
+            validation_json_file,
+            eval_batch_size=eval_batch_size,
+            report_frequency=report_frequency
+        )
+
+        return eval_results, predictions
 
 
 def write_summary(eval_results, summary_dir, current_step, predictions=None):

@@ -157,6 +157,7 @@ def build_assigment_map(prefix=None, skip_variables_regex=None):
     for var in all_vars:
 
         var_name = var.name
+        print(var_name)
         if (
                 var_name[-11:] in "/Momentum:0" or
                 var_name[-11:] in "/Adadelta:0" or
@@ -169,7 +170,7 @@ def build_assigment_map(prefix=None, skip_variables_regex=None):
                 var_name[-16:] in "/LARSOptimizer:0" or
                 var_name[-9:] in "/lamb_m:0" or
                 var_name[-9:] in "/lamb_v:0" or
-                var_name[-9:] in "/shadow:0"
+                var_name[-9:] in "/shadow:0" 
         ):
             continue
 
