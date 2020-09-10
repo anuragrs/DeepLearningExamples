@@ -119,10 +119,12 @@ class InputReader(object):
             except NameError:  # Not a distributed training setup
                 pass
         elif do_dist_eval and (self._mode == tf.estimator.ModeKeys.PREDICT or self._mode == tf.estimator.ModeKeys.EVAL):
+            # 32 validation tf records - distribute on upto 32 workers
             if MPI_is_distributed():
                 logging.info("Using Evaluation Dataset Sharding with Horovod")
                 _shard_idx, _num_shards = MPI_rank_and_size()
             try:
+                num_shards = min(_num,shards, 32)
                 dataset = dataset.shard(
                     num_shards=_num_shards,
                     index=_shard_idx

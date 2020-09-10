@@ -24,9 +24,8 @@ from __future__ import print_function
 import abc
 import os
 import six
-
+from mpi4py import MPI
 import math
-
 import multiprocessing
 
 import tensorflow as tf
@@ -357,6 +356,7 @@ class BaseExecuter(object):
         runtime_config=self._runtime_config
     )
 
+    pending_eval_threads = []
     for cycle in range(1, num_cycles + 1):
 
       if not MPI_is_distributed() or MPI_rank() == 0:
@@ -393,11 +393,12 @@ class BaseExecuter(object):
               hooks=training_hooks,
           )
 
-      if not MPI_is_distributed() or MPI_rank() == 0:
-          print()  # Visual Spacing
-          logging.info("=================================")
-          logging.info('    Start evaluation cycle %02d' % cycle)
-          logging.info("=================================\n")
+#      if not MPI_is_distributed() or MPI_rank() == 0:
+      print()  # Visual Spacing
+      logging.info("=================================")
+      logging.info('    Start worker %03d evaluation cycle %02d' % (MPI_rank(), cycle))
+      logging.info("=================================\n")
+
       if not self._runtime_config.dist_eval:
           if not MPI_is_distributed() or MPI_rank() == 0:
               if eval_estimator is None:
@@ -416,33 +417,44 @@ class BaseExecuter(object):
                   self._runtime_config.val_json_file,
                   report_frequency=self._runtime_config.report_frequency
               )
-      else:
+      elif MPI_rank() < 32: # dist eval on upto 32 GPUs
+          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written
           if eval_estimator is None:
+              logging.info("Built eval estimator")
               eval_run_config = self.build_strategy_configuration('eval')
               eval_params = self.build_model_parameters('eval')
               eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
           last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
           logging.info("Restoring parameters from %s\n" % last_ckpt)
-          eval_results, predictions = evaluation.evaluate(
+          async_eval_thread = evaluation.evaluate(
               eval_estimator,
               eval_input_fn,
-              self._runtime_config.eval_samples // MPI_size(), # divide 5000 by world size
+              self._runtime_config.eval_samples // MPI_size(), # divide 5000 by world size TODO: run eval for a subset of workers so that eval size divides evenly
               self._runtime_config.eval_batch_size,
               self._runtime_config.include_mask,
               self._runtime_config.val_json_file,
               report_frequency=self._runtime_config.report_frequency,
-              do_distributed=True
+              do_distributed=True,
+              latest_ckpt=last_ckpt
           )
+          pending_eval_threads.append(async_eval_thread)
 
-      if not MPI_is_distributed() or MPI_rank() == 0:
+      if not MPI_is_distributed(): # or MPI_rank() == 0:
           self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
       if MPI_is_distributed():
-          from mpi4py import MPI
           MPI.COMM_WORLD.Barrier()  # Waiting for all MPI processes to sync
 
-    return eval_results
+    if MPI_is_distributed():
+        # wait for all evaluation results to be logged
+        for t in pending_eval_threads:
+            if t.is_alive():
+                t.join()
+        return {}
+    else:
+        return eval_results
+
 
   def eval(self, eval_input_fn):
     """Run distributed eval on Mask RCNN model."""

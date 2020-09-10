@@ -27,8 +27,10 @@ import pprint
 import six
 import time
 import itertools
-
+import collections
 import io
+import threading
+
 from PIL import Image
 
 import numpy as np
@@ -110,7 +112,6 @@ def get_predictions(predictor,
     return predictions
 
 
-
 def compute_coco_eval_metric_n(predictions,
                              include_mask=True,
                              annotation_json_file=""):
@@ -120,41 +121,17 @@ def compute_coco_eval_metric_n(predictions,
     if annotation_json_file == "":
         annotation_json_file = None
 
-    use_groundtruth_from_json = (annotation_json_file is not None)
-    batch_idx = 0
-
-    if use_groundtruth_from_json:
-        eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
-    else:
-        eval_metric = coco_metric.EvaluationMetric(filename=None, include_mask=include_mask)
-
     def evaluation_preds(preds):
 
         # Essential to avoid modifying the source dict
         _preds = copy.deepcopy(preds)
-        for k in _preds:
-            logging.info('before '+ k)
-            logging.info(len(_preds[k]))
 
-        for k, v in six.iteritems(_preds):
-            _preds[k] = np.concatenate(_preds[k], axis=0)
-
-        for k in _preds:
-            logging.info('after '+ k)
-            logging.info(len(_preds[k]))
-
-
-        if 'orig_images' in _preds and _preds['orig_images'].shape[0] > 10:
-            # Only samples a few images for visualization.
-            _preds['orig_images'] = _preds['orig_images'][:10]
-
-        if use_groundtruth_from_json:
-            eval_results = eval_metric.predict_metric_fn(_preds)
-
-        else:
-            images, annotations = coco_utils.extract_coco_groundtruth(_preds, include_mask)
-            coco_dataset = coco_utils.create_coco_format_dataset(images, annotations)
-            eval_results = eval_metric.predict_metric_fn(_preds, groundtruth_data=coco_dataset)
+        for k, v in _preds.items():
+            # combined all results in flat structure for eval
+            _preds[k] = np.concatenate(v, axis=0)
+      
+        eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
+        eval_results = eval_metric.predict_metric_fn(_preds)
 
         return eval_results
 
@@ -209,16 +186,8 @@ def compute_coco_eval_metric_1(predictor,
         # Essential to avoid modifying the source dict
         _preds = copy.deepcopy(preds)
 
-        for k in _preds:
-            logging.info('before '+ k)
-            logging.info(len(_preds[k]))
-
         for k, v in six.iteritems(_preds):
             _preds[k] = np.concatenate(_preds[k], axis=0)
-
-        for k in _preds:
-            logging.info('after '+ k)
-            logging.info(len(_preds[k]))
 
         if 'orig_images' in _preds and _preds['orig_images'].shape[0] > 10:
             # Only samples a few images for visualization.
@@ -276,11 +245,15 @@ def compute_coco_eval_metric_1(predictor,
 
         # If you want the report to happen each report_frequency to happen each report_frequency batches.
         # Thus, each report is of eval_batch_size * report_frequency
-        if report_frequency and batch_idx % report_frequency == 0:
+#        if report_frequency and batch_idx % report_frequency == 0:
+#            eval_results = evaluation_preds(preds=predictions)
+#            logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
+        if batch_idx % 50 == 0:
             eval_results = evaluation_preds(preds=predictions)
             logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
 
     inference_time_list.sort()
+    logging.info(predictions['source_id'])
     eval_results = evaluation_preds(preds=predictions)
 
     average_time = np.mean(inference_time_list)
@@ -349,11 +322,13 @@ def evaluate(eval_estimator,
              include_mask=True,
              validation_json_file="",
              report_frequency=None,
+             latest_ckpt=None,
              do_distributed=False):
 
     """Runs COCO evaluation once."""
     predictor = eval_estimator.predict(
         input_fn=input_fn,
+        checkpoint_path=latest_ckpt,
         yield_single_examples=False
     )
 
@@ -366,33 +341,26 @@ def evaluate(eval_estimator,
             num_batches=num_eval_times,
             eval_batch_size=eval_batch_size)
 
-
-        for k in worker_predictions:
-            logging.info(k)
-            logging.info(len(worker_predictions[k]))
-
         # gather on rank 0
         predictions_list = gather_result_from_all_processes(worker_predictions)
 
-        if MPI_rank() == 0:    
-            all_predictions = {}
-            for i, p in enumerate(predictions_list):
-                if p:
-                    for k in p:
-                        if k in all_predictions:
-                            all_predictions[k].extend(p[k])
-                        else:
-                            all_predictions[k] = p[k]
-            for k in all_predictions:
-                logging.info(k)
-                logging.info(len(all_predictions[k]))
+        if MPI_rank() == 0:
+            all_predictions = collections.defaultdict(list)
+            for shard, p in enumerate(predictions_list):
+                if not 'source_id' in p:
+                    # empty shard
+                    logging.info("Empty shard!")
+                    continue
+                for k, v in p.items():
+                    all_predictions[k].extend(v)
+
             # run metric calculation on root node TODO: launch this in it's own thread
-            eval_results = compute_coco_eval_metric_n(
-                all_predictions,
-                include_mask,
-                validation_json_file)
-            return eval_results, all_predictions
-        return {}, {}
+            args = [all_predictions, include_mask, validation_json_file]
+            eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
+            eval_thread.start()
+            logging.info("Launched compute eval metrics thread ...")
+            return eval_thread
+        return None
     else:
         eval_results, predictions = compute_coco_eval_metric_1(
             predictor,

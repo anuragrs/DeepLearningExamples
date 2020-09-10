@@ -112,3 +112,6 @@ class CheckpointSaverHook(tf.estimator.SessionRunHook):
             tf.compat.v1.SessionLog(status=tf.compat.v1.SessionLog.CHECKPOINT, checkpoint_path=self._save_path),
             step
         )
+
+        logging.info("Saved checkpoints for %d into %s.", step, self._save_path)
+
