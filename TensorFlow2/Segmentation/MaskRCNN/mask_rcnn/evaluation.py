@@ -113,6 +113,7 @@ def get_predictions(predictor,
 
 
 def compute_coco_eval_metric_n(predictions,
+                             source_ids,
                              include_mask=True,
                              annotation_json_file=""):
     """Compute COCO eval metric given a predictions.
@@ -121,21 +122,9 @@ def compute_coco_eval_metric_n(predictions,
     if annotation_json_file == "":
         annotation_json_file = None
 
-    def evaluation_preds(preds):
+    eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
+    eval_results = eval_metric.predict_metric_fn2(predictions, source_ids)
 
-        # Essential to avoid modifying the source dict
-        _preds = copy.deepcopy(preds)
-
-        for k, v in _preds.items():
-            # combined all results in flat structure for eval
-            _preds[k] = np.concatenate(v, axis=0)
-      
-        eval_metric = coco_metric.EvaluationMetric(annotation_json_file, include_mask=include_mask)
-        eval_results = eval_metric.predict_metric_fn(_preds)
-
-        return eval_results
-
-    eval_results = evaluation_preds(preds=predictions)
     logging.info("==================== Metrics ====================")
 
     # logging.info('Eval Epoch results: %s' % pprint.pformat(eval_results, indent=4))
@@ -245,9 +234,9 @@ def compute_coco_eval_metric_1(predictor,
 
         # If you want the report to happen each report_frequency to happen each report_frequency batches.
         # Thus, each report is of eval_batch_size * report_frequency
-#        if report_frequency and batch_idx % report_frequency == 0:
-#            eval_results = evaluation_preds(preds=predictions)
-#            logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
+        if report_frequency and batch_idx % report_frequency == 0:
+            eval_results = evaluation_preds(preds=predictions)
+            logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
         if batch_idx % 50 == 0:
             eval_results = evaluation_preds(preds=predictions)
             logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
@@ -342,26 +331,28 @@ def evaluate(eval_estimator,
             eval_batch_size=eval_batch_size)
         logging.info(worker_predictions['source_id'])
         # DEBUG - print worker predictions
-        _ = compute_coco_eval_metric_n(worker_predictions, False, validation_json_file)
-
+        # _ = compute_coco_eval_metric_n(worker_predictions, False, validation_json_file)
+        coco = coco_metric.MaskCOCO()
+        _preds = copy.deepcopy(worker_predictions)
+        for k, v in _preds.items():
+            # combined all results in flat structure for eval
+            _preds[k] = np.concatenate(v, axis=0)
+        converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+        worker_source_ids = _preds['source_id']
+        # logging.info(converted_predictions)
         # gather on rank 0
-        predictions_list = gather_result_from_all_processes(worker_predictions)
-
+        predictions_list = gather_result_from_all_processes(converted_predictions)
+        source_ids_list = gather_result_from_all_processes(worker_source_ids)
         if MPI_rank() == 0:
-            all_predictions = collections.defaultdict(list)
-            for shard, p in enumerate(predictions_list):
-                if not 'source_id' in p:
-                    # empty shard
-                    logging.info("Empty shard!")
-                    continue
-                for k, v in p.items():
-                    if k == 'source_id':
-                        logging.info('p{}'.format(shard))
-                        logging.info(p['source_id'])
-                    all_predictions[k].extend(v)
+            all_predictions = []
+            source_ids = []
+            for p in predictions_list:
+                all_predictions.extend(p)
+            for s in source_ids_list:
+                source_ids.extend(s)
 
             # run metric calculation on root node TODO: launch this in it's own thread
-            args = [all_predictions, include_mask, validation_json_file]
+            args = [all_predictions, source_ids, include_mask, validation_json_file]
             eval_thread = threading.Thread(target=compute_coco_eval_metric_n, name="eval-thread", args=args)
             eval_thread.start()
             logging.info("Launched compute eval metrics thread ...")
