@@ -449,7 +449,7 @@ class BaseExecuter(object):
     if MPI_is_distributed():
         # wait for all evaluation results to be logged
         for t in pending_eval_threads:
-            if t.is_alive():
+            if t and t.is_alive():
                 t.join()
         return {}
     else:

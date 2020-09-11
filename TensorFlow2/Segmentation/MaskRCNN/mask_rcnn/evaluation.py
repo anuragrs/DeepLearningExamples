@@ -340,6 +340,9 @@ def evaluate(eval_estimator,
         worker_predictions = get_predictions(predictor,
             num_batches=num_eval_times,
             eval_batch_size=eval_batch_size)
+        logging.info(worker_predictions['source_id'])
+        # DEBUG - print worker predictions
+        _ = compute_coco_eval_metric_n(worker_predictions, False, validation_json_file)
 
         # gather on rank 0
         predictions_list = gather_result_from_all_processes(worker_predictions)
@@ -352,6 +355,9 @@ def evaluate(eval_estimator,
                     logging.info("Empty shard!")
                     continue
                 for k, v in p.items():
+                    if k == 'source_id':
+                        logging.info('p{}'.format(shard))
+                        logging.info(p['source_id'])
                     all_predictions[k].extend(v)
 
             # run metric calculation on root node TODO: launch this in it's own thread

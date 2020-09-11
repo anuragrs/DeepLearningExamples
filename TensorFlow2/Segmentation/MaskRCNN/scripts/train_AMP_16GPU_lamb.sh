@@ -47,4 +47,4 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --amp \
         --use_batched_nms \
         --xla \
-        --use_custom_box_proposals_op
+        --use_custom_box_proposals_op | tee run.log

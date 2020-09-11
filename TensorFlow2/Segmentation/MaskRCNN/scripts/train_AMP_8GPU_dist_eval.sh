@@ -35,10 +35,10 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --init_learning_rate=0.04 \
         --learning_rate_steps="30000,40000" \
         --model_dir="/shared/results_1x_eval/" \
-        --num_steps_per_eval=10 \
+        --num_steps_per_eval=300 \
         --total_steps=45000 \
         --train_batch_size=4 \
-        --eval_batch_size=3696 \
+        --eval_batch_size=8 \
 	--dist_eval \
         --training_file_pattern="/shared/data/coco/nv_tfrecords/train*.tfrecord" \
         --validation_file_pattern="/shared/data/coco/nv_tfrecords/val*.tfrecord" \
