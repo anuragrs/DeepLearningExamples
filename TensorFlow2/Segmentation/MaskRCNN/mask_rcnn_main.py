@@ -127,7 +127,6 @@ def main(argv):
         train_input_fn = None
 
     if RUN_CONFIG.mode in ('eval', 'train_and_eval' or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training)):
-
         eval_input_fn = dataloader.InputReader(
             file_pattern=RUN_CONFIG.validation_file_pattern,
             mode=tf.estimator.ModeKeys.PREDICT,
@@ -136,7 +135,6 @@ def main(argv):
             use_instance_mask=RUN_CONFIG.include_mask,
             seed=RUN_CONFIG.seed
         )
-
     else:
         eval_input_fn = None
 

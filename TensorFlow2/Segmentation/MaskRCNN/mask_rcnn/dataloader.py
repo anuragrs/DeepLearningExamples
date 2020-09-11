@@ -123,11 +123,11 @@ class InputReader(object):
             if MPI_is_distributed():
                 logging.info("Using Evaluation Dataset Sharding with Horovod")
                 _shard_idx, _num_shards = MPI_rank_and_size()
+                max_shards = min(_num_shards, 32)
                 try:
-                    _num_shards = min(_num_shards, 32)
                     dataset = dataset.shard(
-                        num_shards=_num_shards,
-                        index=_shard_idx
+                        num_shards=max_shards,
+                        index=_shard_idx % max_shards
                     )
                 except NameError:  # Not a distributed training setup
                     pass

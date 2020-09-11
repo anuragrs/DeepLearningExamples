@@ -399,6 +399,10 @@ class BaseExecuter(object):
       logging.info('    Start worker %03d evaluation cycle %02d' % (MPI_rank(), cycle))
       logging.info("=================================\n")
 
+
+      if MPI_is_distributed():
+          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written
+
       if not self._runtime_config.dist_eval:
           if not MPI_is_distributed() or MPI_rank() == 0:
               if eval_estimator is None:
@@ -417,8 +421,7 @@ class BaseExecuter(object):
                   self._runtime_config.val_json_file,
                   report_frequency=self._runtime_config.report_frequency
               )
-      elif MPI_rank() < 32: # dist eval on upto 32 GPUs
-          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written
+      else: #if MPI_rank() < 32: # dist eval on upto 32 GPUs
           if eval_estimator is None:
               logging.info("Built eval estimator")
               eval_run_config = self.build_strategy_configuration('eval')
@@ -427,10 +430,11 @@ class BaseExecuter(object):
 
           last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
           logging.info("Restoring parameters from %s\n" % last_ckpt)
+          num_eval_workers = min(32, MPI_size())
           async_eval_thread = evaluation.evaluate(
               eval_estimator,
               eval_input_fn,
-              self._runtime_config.eval_samples // MPI_size(), # divide 5000 by world size TODO: run eval for a subset of workers so that eval size divides evenly
+              self._runtime_config.eval_samples // num_eval_workers, # divide 5000 by num eval workers TODO: run eval for a subset of workers so that eval size divides evenly
               self._runtime_config.eval_batch_size,
               self._runtime_config.include_mask,
               self._runtime_config.val_json_file,
