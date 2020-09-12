@@ -399,7 +399,8 @@ class EvaluationMetric(object):
       metrics_dict[name] = metrics[i]
     return metrics_dict
 
-def predict_metric_fn(self,
+
+  def predict_metric_fn(self,
                         predictions,
                         is_predict_image_mask=False,
                         groundtruth_data=None):

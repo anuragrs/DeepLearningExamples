@@ -392,16 +392,19 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
+      MIN_EVAL_EPOCH = 0 # 8
+      if cycle < MIN_EVAL_EPOCH:
+          continue
 
-#      if not MPI_is_distributed() or MPI_rank() == 0:
-      print()  # Visual Spacing
-      logging.info("=================================")
-      logging.info('    Start worker %03d evaluation cycle %02d' % (MPI_rank(), cycle))
-      logging.info("=================================\n")
+      if not MPI_is_distributed() or MPI_rank() == 0:
+          print()  # Visual Spacing
+          logging.info("=================================")
+          logging.info('    Start evaluation cycle %02d' % cycle)
+          logging.info("=================================\n")
 
 
-      if MPI_is_distributed():
-          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written
+      if self._runtime_config.dist_eval and MPI_is_distributed():
+          MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written (important for dist eval)
 
       if not self._runtime_config.dist_eval:
           if not MPI_is_distributed() or MPI_rank() == 0:
@@ -421,7 +424,7 @@ class BaseExecuter(object):
                   self._runtime_config.val_json_file,
                   report_frequency=self._runtime_config.report_frequency
               )
-      else: #if MPI_rank() < 32: # dist eval on upto 32 GPUs
+      else:
           if eval_estimator is None:
               logging.info("Built eval estimator")
               eval_run_config = self.build_strategy_configuration('eval')
@@ -444,7 +447,7 @@ class BaseExecuter(object):
           )
           pending_eval_threads.append(async_eval_thread)
 
-      if not MPI_is_distributed(): # or MPI_rank() == 0:
+      if not MPI_is_distributed(): # or MPI_rank() == 0: TODO: move write summary to thread run in case of dist eval
           self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
       if MPI_is_distributed():

@@ -76,7 +76,7 @@ def get_predictions(predictor,
     predictions = dict()
     batch_idx = 0
 
-
+    T0 = time.time()
     while num_batches < 0 or batch_idx < num_batches:
 
         try:
@@ -108,7 +108,7 @@ def get_predictions(predictor,
                 predictions[k].append(v)
 
         batch_idx = batch_idx + 1
-
+    logging.info('Inference took {}s'.format(time.time() - T0))
     return predictions
 
 
@@ -118,7 +118,7 @@ def compute_coco_eval_metric_n(predictions,
                              annotation_json_file=""):
     """Compute COCO eval metric given a predictions.
     """
-
+    logging.info("Metric calculation started {}".format(time.time()))
     if annotation_json_file == "":
         annotation_json_file = None
 
@@ -131,6 +131,7 @@ def compute_coco_eval_metric_n(predictions,
     for key, value in sorted(eval_results.items(), key=operator.itemgetter(0)):
         logging.info("%s: %.9f" % (key, value))
     print()  # Visual Spacing
+    logging.info("Metric calculation ended {}".format(time.time()))
     return eval_results
 
 
@@ -346,10 +347,12 @@ def evaluate(eval_estimator,
         if MPI_rank() == 0:
             all_predictions = []
             source_ids = []
-            for p in predictions_list:
-                all_predictions.extend(p)
-            for s in source_ids_list:
-                source_ids.extend(s)
+            for i, p in enumerate(predictions_list):
+                if i < 32: # max eval workers (TODO config)
+                    all_predictions.extend(p)
+            for i, s in enumerate(source_ids_list):
+                if i < 32:
+                    source_ids.extend(s)
 
             # run metric calculation on root node TODO: launch this in it's own thread
             args = [all_predictions, source_ids, include_mask, validation_json_file]
