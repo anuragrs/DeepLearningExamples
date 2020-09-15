@@ -62,7 +62,7 @@ def run_executer(runtime_config, train_input_fn=None, eval_input_fn=None):
         executer.train(
             train_input_fn=train_input_fn,
             run_eval_after_train=FLAGS.eval_after_training,
-            eval_input_fn=eval_input_fn
+            eval_input_fn=eval_input_fn,
         )
 
     elif runtime_config.mode == 'eval':
@@ -126,7 +126,7 @@ def main(argv):
     else:
         train_input_fn = None
 
-    if RUN_CONFIG.mode in ('eval', 'train_and_eval' or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training)):
+    if RUN_CONFIG.mode in ('eval', 'train_and_eval') or (RUN_CONFIG.mode == 'train' and RUN_CONFIG.eval_after_training):
         eval_input_fn = dataloader.InputReader(
             file_pattern=RUN_CONFIG.validation_file_pattern,
             mode=tf.estimator.ModeKeys.PREDICT,

@@ -321,14 +321,14 @@ def main(_):
       FLAGS.train_image_dir,
       train_output_path,
       FLAGS.include_masks,
-      num_shards=256)
+      num_shards=1024)
   _create_tf_record_from_coco_annotations(
       FLAGS.val_object_annotations_file,
       FLAGS.val_caption_annotations_file,
       FLAGS.val_image_dir,
       val_output_path,
       FLAGS.include_masks,
-      num_shards=32)
+      num_shards=64)
 
 
 if __name__ == '__main__':

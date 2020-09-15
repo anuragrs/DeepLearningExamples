@@ -238,9 +238,6 @@ def compute_coco_eval_metric_1(predictor,
         if report_frequency and batch_idx % report_frequency == 0:
             eval_results = evaluation_preds(preds=predictions)
             logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
-        if batch_idx % 50 == 0:
-            eval_results = evaluation_preds(preds=predictions)
-            logging.info('Eval results: %s' % pprint.pformat(eval_results, indent=4))
 
     inference_time_list.sort()
     logging.info(predictions['source_id'])
@@ -338,8 +335,13 @@ def evaluate(eval_estimator,
         for k, v in _preds.items():
             # combined all results in flat structure for eval
             _preds[k] = np.concatenate(v, axis=0)
-        converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
-        worker_source_ids = _preds['source_id']
+        if MPI_rank() < 32:
+            converted_predictions = coco.load_predictions(_preds, include_mask=True, is_image_mask=False)
+            worker_source_ids = _preds['source_id']
+        else:
+            converted_predictions = []
+            worker_source_ids = []
+
         # logging.info(converted_predictions)
         # gather on rank 0
         predictions_list = gather_result_from_all_processes(converted_predictions)

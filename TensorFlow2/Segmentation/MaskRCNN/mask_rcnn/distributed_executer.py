@@ -299,7 +299,7 @@ class BaseExecuter(object):
         max_steps=self._runtime_config.total_steps,
         hooks=get_training_hooks(
             mode="train",
-            runtime_cfg=self._runtime_config,
+            runtime_config=self._runtime_config,
         )
     )
 
@@ -309,30 +309,91 @@ class BaseExecuter(object):
     if eval_input_fn is None:
       raise ValueError('Eval input_fn must be passed to conduct evaluation after training.')
 
-    eval_run_config = self.build_strategy_configuration('eval')
-    eval_params = self.build_model_parameters('eval')
-    eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
+    if self._runtime_config.dist_eval and MPI_is_distributed():
+        MPI.COMM_WORLD.Barrier()  # Waiting for checkpoint to be written (important for dist eval)
+    eval_estimator = None
+    pending_eval_threads = []
+    if not self._runtime_config.dist_eval:
+        if not MPI_is_distributed() or MPI_rank() == 0:
+            if eval_estimator is None:
+                eval_run_config = self.build_strategy_configuration('eval')
+                eval_params = self.build_model_parameters('eval')
+                eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
-    last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
-    logging.info("Restoring parameters from %s\n" % last_ckpt)
+            last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+            logging.info("Restoring parameters from %s\n" % last_ckpt)
+            eval_results, predictions = evaluation.evaluate(
+                eval_estimator,
+                eval_input_fn,
+                self._runtime_config.eval_samples,
+                self._runtime_config.eval_batch_size,
+                self._runtime_config.include_mask,
+                self._runtime_config.val_json_file,
+                report_frequency=self._runtime_config.report_frequency
+            )
+    else:
+        if eval_estimator is None:
+            logging.info("Built eval estimator")
+            eval_run_config = self.build_strategy_configuration('eval')
+            eval_params = self.build_model_parameters('eval')
+            eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
 
-    eval_results, predictions = evaluation.evaluate(
-        eval_estimator,
-        eval_input_fn,
-        self._runtime_config.eval_samples,
-        self._runtime_config.eval_batch_size,
-        self._runtime_config.include_mask,
-        self._runtime_config.val_json_file,
-        report_frequency=self._runtime_config.report_frequency
-    )
+        last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+        logging.info("Restoring parameters from %s\n" % last_ckpt)
+        num_eval_workers = min(32, MPI_size())
+        async_eval_thread = evaluation.evaluate(
+            eval_estimator,
+            eval_input_fn,
+            self._runtime_config.eval_samples // num_eval_workers, # divide 5000 by num eval workers TODO: run eval for a subset of workers so that eval size divides evenly
+            self._runtime_config.eval_batch_size,
+            self._runtime_config.include_mask,
+            self._runtime_config.val_json_file,
+            report_frequency=self._runtime_config.report_frequency,
+            do_distributed=True,
+            latest_ckpt=last_ckpt
+        )
+        pending_eval_threads.append(async_eval_thread)
 
-    output_dir = os.path.join(self._runtime_config.model_dir, 'eval')
-    tf.io.gfile.makedirs(output_dir)
+    if not MPI_is_distributed(): # or MPI_rank() == 0: TODO: move write summary to thread run in case of dist eval
+        self._write_summary(output_dir, eval_results, predictions, max_cycle_step)
 
-    # Summary writer writes out eval metrics.
-    self._write_summary(output_dir, eval_results, predictions, self._runtime_config.total_steps)
+    if MPI_is_distributed():
+        MPI.COMM_WORLD.Barrier()  # Waiting for all MPI processes to sync
 
-    return eval_results
+    if MPI_is_distributed():
+        # wait for all evaluation results to be logged
+        for t in pending_eval_threads:
+            if t and t.is_alive():
+                t.join()
+        return {}
+    else:
+        return eval_results
+
+
+#    eval_run_config = self.build_strategy_configuration('eval')
+#    eval_params = self.build_model_parameters('eval')
+#    eval_estimator = self.build_mask_rcnn_estimator(eval_params, eval_run_config, 'eval')
+#
+#    last_ckpt = tf.train.latest_checkpoint(self._runtime_config.model_dir, latest_filename=None)
+#    logging.info("Restoring parameters from %s\n" % last_ckpt)
+#
+#    eval_results, predictions = evaluation.evaluate(
+#        eval_estimator,
+#        eval_input_fn,
+#        self._runtime_config.eval_samples,
+#        self._runtime_config.eval_batch_size,
+#        self._runtime_config.include_mask,
+#        self._runtime_config.val_json_file,
+#        report_frequency=self._runtime_config.report_frequency
+#    )
+#
+#    output_dir = os.path.join(self._runtime_config.model_dir, 'eval')
+#    tf.io.gfile.makedirs(output_dir)
+#
+#    # Summary writer writes out eval metrics.
+#    self._write_summary(output_dir, eval_results, predictions, self._runtime_config.total_steps)
+#
+#    return eval_results
 
   def train_and_eval(self, train_input_fn, eval_input_fn):
     """Run distributed train and eval on Mask RCNN model."""
@@ -392,7 +453,7 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
-      MIN_EVAL_EPOCH = 0 # 8
+      MIN_EVAL_EPOCH = 15
       if cycle < MIN_EVAL_EPOCH:
           continue
 
@@ -537,7 +598,7 @@ class EstimatorExecuter(BaseExecuter):
         ),
         model_dir=self._runtime_config.model_dir,
         save_summary_steps=None,  # disabled
-        save_checkpoints_steps=None,  # disabled
+        save_checkpoints_steps=None, # disabled
         save_checkpoints_secs=None,  # disabled
         keep_checkpoint_max=20,  # disabled
         keep_checkpoint_every_n_hours=None,  # disabled

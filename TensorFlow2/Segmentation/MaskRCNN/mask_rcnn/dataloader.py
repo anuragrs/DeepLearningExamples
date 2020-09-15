@@ -148,7 +148,6 @@ class InputReader(object):
             dataset = dataset.take(self._num_examples)
 
         dataset = dataset.cache()
-
         if self._mode == tf.estimator.ModeKeys.TRAIN:
             dataset = dataset.shuffle(
                 buffer_size=4096,
