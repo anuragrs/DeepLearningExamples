@@ -120,35 +120,95 @@ def dataset_parser(value, mode, params, use_instance_mask, seed=None, regenerate
 
             if mode == tf.estimator.ModeKeys.PREDICT:
 
+                labels = {}
                 features = {
-                    'source_ids': source_id,
+                    'source_ids': source_id
                 }
 
-                if params['visualize_images_summary']:
-                    features['orig_images'] = tf.image.resize(image, params['image_size'])
+                boxes, classes, indices, instance_masks = process_boxes_classes_indices_for_training(
+                    data,
+                    skip_crowd_during_training=params['skip_crowd_during_training'],
+                    use_category=params['use_category'],
+                    use_instance_mask=use_instance_mask
+                )
 
-                features["images"], features["image_info"], _, _ = preprocess_image(
+                image, image_info, boxes, instance_masks = preprocess_image(
                     image,
-                    boxes=None,
-                    instance_masks=None,
+                    boxes=boxes,
+                    instance_masks=instance_masks,
                     image_size=params['image_size'],
                     max_level=params['max_level'],
                     augment_input_data=False,
                     seed=seed
                 )
 
-                if params['include_groundtruth_in_features']:
-                    labels = prepare_labels_for_eval(
-                        data,
-                        target_num_instances=MAX_NUM_INSTANCES,
-                        target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
-                        use_instance_mask=params['include_mask']
+                features.update({
+                    'images': image,
+                    'image_info': image_info,
+                })
+
+                padded_image_size = image.get_shape().as_list()[:2]
+
+                # Pads cropped_gt_masks.
+                if use_instance_mask:
+                    labels['cropped_gt_masks'] = process_gt_masks_for_training(
+                        instance_masks,
+                        boxes,
+                        gt_mask_size=params['gt_mask_size'],
+                        padded_image_size=padded_image_size,
+                        max_num_instances=MAX_NUM_INSTANCES
                     )
-                    return {'features': features, 'labels': labels}
 
-                else:
-                    return {'features': features}
+                with tf.xla.experimental.jit_scope(compile_ops=False):
+                    # Assign anchors.
+                    (score_targets, box_targets), input_anchor = process_targets_for_training(
+                        padded_image_size=padded_image_size,
+                        boxes=boxes,
+                        classes=classes,
+                        params=params
+                    )
 
+                additional_labels = process_labels_for_training(
+                    image_info, boxes, classes, score_targets, box_targets,
+                    max_num_instances=MAX_NUM_INSTANCES,
+                    min_level=params["min_level"],
+                    max_level=params["max_level"]
+                )
+
+                labels.update(additional_labels)
+#                return features, labels
+                return {'features': features, 'labels': labels}
+
+
+#                features = {
+#                    'source_ids': source_id,
+#                }
+#
+#                if params['visualize_images_summary']:
+#                    features['orig_images'] = tf.image.resize(image, params['image_size'])
+#
+#                features["images"], features["image_info"], _, _ = preprocess_image(
+#                    image,
+#                    boxes=None,
+#                    instance_masks=None,
+#                    image_size=params['image_size'],
+#                    max_level=params['max_level'],
+#                    augment_input_data=False,
+#                    seed=seed
+#                )
+#
+#                if params['include_groundtruth_in_features']:
+#                    labels = prepare_labels_for_eval(
+#                        data,
+#                        target_num_instances=MAX_NUM_INSTANCES,
+#                        target_polygon_list_len=MAX_NUM_POLYGON_LIST_LEN,
+#                        use_instance_mask=params['include_mask']
+#                    )
+#                    return {'features': features, 'labels': labels}
+#
+#                else:
+#                    return {'features': features}
+#
             elif mode == tf.estimator.ModeKeys.TRAIN:
 
                 labels = {}
@@ -318,7 +378,9 @@ def prepare_labels_for_eval(
     """Create labels dict for infeed from data of tf.Example."""
     image = data['image']
 
-    height, width = tf.shape(input=image)[:2]
+    image_shape = tf.shape(input=image)
+
+    height, width = image_shape[0], image_shape[1]
 
     boxes = data['groundtruth_boxes']
 
@@ -338,6 +400,8 @@ def prepare_labels_for_eval(
     labels['height'] = height
     labels['groundtruth_boxes'] = boxes
     labels['groundtruth_classes'] = classes
+    labels['gt_boxes'] = boxes
+    labels['gt_classes'] = classes
     labels['num_groundtruth_labels'] = num_labels
     labels['groundtruth_is_crowd'] = is_crowd
 

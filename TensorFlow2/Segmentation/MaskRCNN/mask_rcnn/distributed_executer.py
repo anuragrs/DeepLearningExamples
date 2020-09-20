@@ -60,7 +60,8 @@ def get_training_hooks(mode, model_dir, checkpoint_path=None, skip_checkpoint_va
             log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
             # warmup_steps=RUNNING_CONFIG.warmup_steps,
             warmup_steps=100,
-            is_training=True
+            is_training=True,
+            summary_dir=model_dir
         )
     ]
 

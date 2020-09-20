@@ -100,7 +100,7 @@ def build_model_graph(features, labels, is_training, params):
     """Builds the forward model graph."""
     model_outputs = {}
     is_gpu_inference = not is_training and params['use_batched_nms']
-
+   
     batch_size, image_height, image_width, _ = features['images'].get_shape().as_list()
 
     if 'source_ids' not in features:
@@ -243,6 +243,47 @@ def build_model_graph(features, labels, is_training, params):
             'detection_scores': detections[3],
         })
 
+        #AS: redo stuff for loss calc
+        # Sampling
+        box_targets, class_targets, rpn_box_rois, proposal_to_label_map = training_ops.proposal_label_op(
+            rpn_box_rois,
+            labels['gt_boxes'],
+            labels['gt_classes'],
+            batch_size_per_im=params['batch_size_per_im'],
+            fg_fraction=params['fg_fraction'],
+            fg_thresh=params['fg_thresh'],
+            bg_thresh_hi=params['bg_thresh_hi'],
+            bg_thresh_lo=params['bg_thresh_lo']
+        )
+
+        # Performs multi-level RoIAlign.
+        box_roi_features = spatial_transform_ops.multilevel_crop_and_resize(
+            features=fpn_feats,
+            boxes=rpn_box_rois,
+            output_size=7,
+            is_gpu_inference=is_gpu_inference
+        )
+
+        class_outputs, box_outputs, _ = MODELS["Box_Head"](inputs=box_roi_features)
+
+
+        #AS:
+        encoded_box_targets = training_ops.encode_box_targets(
+            boxes=rpn_box_rois,
+            gt_boxes=box_targets,
+            gt_labels=class_targets,
+            bbox_reg_weights=params['bbox_reg_weights']
+        )
+        #AS:
+        model_outputs.update({
+            'rpn_score_outputs': rpn_score_outputs,
+            'rpn_box_outputs': rpn_box_outputs,
+            'class_outputs': class_outputs,
+            'box_outputs': box_outputs,
+            'class_targets': class_targets,
+            'box_targets': encoded_box_targets,
+            'box_rois': rpn_box_rois,
+        })
     else:  # is training
         encoded_box_targets = training_ops.encode_box_targets(
             boxes=rpn_box_rois,
@@ -388,17 +429,17 @@ def _model_fn(features, labels, mode, params):
         except KeyError:
             pass
 
-        if labels and params['include_groundtruth_in_features']:
-            # Labels can only be embedded in predictions. The prediction cannot output
-            # dictionary as a value.
-            predictions.update(labels)
+#        if labels and params['include_groundtruth_in_features']:
+#            # Labels can only be embedded in predictions. The prediction cannot output
+#            # dictionary as a value.
+#            predictions.update(labels)
 
         model_outputs.pop('fpn_features', None)
         predictions.update(model_outputs)
 
-        if mode == tf.estimator.ModeKeys.PREDICT:
-            # If we are doing PREDICT, we can return here.
-            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+#        if mode == tf.estimator.ModeKeys.PREDICT:
+#            # If we are doing PREDICT, we can return here.
+#            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
     # score_loss and box_loss are for logging. only total_loss is optimized.
     total_rpn_loss, rpn_score_loss, rpn_box_loss = losses.rpn_loss(
@@ -431,20 +472,36 @@ def _model_fn(features, labels, mode, params):
 
     trainable_variables = list(itertools.chain.from_iterable([model.trainable_variables for model in MODELS.values()]))
 
-    l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
-        tf.nn.l2_loss(v)
-        for v in trainable_variables
-        if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
-    ])
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
+            tf.nn.l2_loss(v)
+            for v in trainable_variables
+            if not any([pattern in v.name for pattern in ["batch_normalization", "bias", "beta"]])
+        ])
+    else:
+        l2_regularization_loss = 0.
 
     total_loss = total_rpn_loss + total_fast_rcnn_loss + mask_loss + l2_regularization_loss
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        # Predictions can only contain a dict of tensors, not a dict of dict of
+        # tensors. These outputs are not used for eval purposes.
+        del predictions['rpn_score_outputs']
+        del predictions['rpn_box_outputs']
+        pred_keys = ['num_detections', 'detection_boxes', 'detection_classes', 'detection_scores', 'detection_masks', 'source_id', 'image_info']
+        for key in list(predictions.keys()):
+            if not key in pred_keys:
+                del predictions[key]
+        predictions['val_loss'] = total_loss
+        # If we are doing PREDICT, we can return here.
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
 
     if mode == tf.estimator.ModeKeys.EVAL:
         # Predictions can only contain a dict of tensors, not a dict of dict of
         # tensors. These outputs are not used for eval purposes.
         del predictions['rpn_score_outputs']
         del predictions['rpn_box_outputs']
-
         return tf.estimator.EstimatorSpec(
             mode=mode,
             predictions=predictions,

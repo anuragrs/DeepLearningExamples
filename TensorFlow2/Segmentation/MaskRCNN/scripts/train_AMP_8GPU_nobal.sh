@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-rm -rf /shared/balanced/results_nv8/
-mkdir -p /shared/balanced/results_nv8/
+rm -rf /shared/balanced/results_nv8_nobal2/
+mkdir -p /shared/balanced/results_nv8_nobal2/
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
@@ -34,16 +34,16 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --eval_samples=5000 \
         --init_learning_rate=0.04 \
         --learning_rate_steps="30000,40000" \
-        --model_dir="/shared/balanced/results_nv8/" \
+        --model_dir="/shared/balanced/results_nv8_nobal2/" \
         --num_steps_per_eval=3696 \
         --total_steps=45000 \
         --train_batch_size=4 \
         --eval_batch_size=8 \
 	--include_groundtruth_in_features \
-        --training_file_pattern="/shared/data3/train*.tfrecord" \
-        --validation_file_pattern="/shared/data3/val*.tfrecord" \
-        --val_json_file="/shared/data3/annotations/instances_val2017.json" \
+        --training_file_pattern="/shared/data2/train*.tfrecord" \
+        --validation_file_pattern="/shared/data2/val*.tfrecord" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
-        --use_custom_box_proposals_op | tee /shared/balanced/results_nv8/train_eval.log
+        --use_custom_box_proposals_op | tee /shared/balanced/results_nv8_nobal2/train_eval.log

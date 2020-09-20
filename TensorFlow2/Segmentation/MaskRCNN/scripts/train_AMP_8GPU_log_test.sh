@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-rm -rf /shared/balanced/results_nv8/
-mkdir -p /shared/balanced/results_nv8/
+rm -rf /shared/results_log_test/
+mkdir -p /shared/results_log_test/
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
@@ -34,16 +34,17 @@ BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
         --eval_samples=5000 \
         --init_learning_rate=0.04 \
         --learning_rate_steps="30000,40000" \
-        --model_dir="/shared/balanced/results_nv8/" \
-        --num_steps_per_eval=3696 \
+        --model_dir="/shared/results_log_test/" \
+        --num_steps_per_eval=10 \
         --total_steps=45000 \
         --train_batch_size=4 \
         --eval_batch_size=8 \
 	--include_groundtruth_in_features \
         --training_file_pattern="/shared/data3/train*.tfrecord" \
         --validation_file_pattern="/shared/data3/val*.tfrecord" \
-        --val_json_file="/shared/data3/annotations/instances_val2017.json" \
+        --val_json_file="/shared/data2/annotations/instances_val2017.json" \
         --amp \
         --use_batched_nms \
         --xla \
-        --use_custom_box_proposals_op | tee /shared/balanced/results_nv8/train_eval.log
+        --use_custom_box_proposals_op | tee /shared/results_log_test/train_eval.log
+

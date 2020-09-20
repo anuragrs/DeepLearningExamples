@@ -100,12 +100,15 @@ def compute_coco_eval_metric(predictor,
         eval_metric = coco_metric.EvaluationMetric(filename=None, include_mask=include_mask)
 
     def evaluation_preds(preds):
-
+        # print(preds['source_id'])
         # Essential to avoid modifying the source dict
         _preds = copy.deepcopy(preds)
-
         for k, v in six.iteritems(_preds):
-            _preds[k] = np.concatenate(_preds[k], axis=0)
+            print("key:", k)
+            if k != 'val_loss':
+                _preds[k] = np.concatenate(_preds[k], axis=0)
+            else:
+                _preds[k] = np.mean(_preds[k])
 
         if 'orig_images' in _preds and _preds['orig_images'].shape[0] > 10:
             # Only samples a few images for visualization.
@@ -118,7 +121,7 @@ def compute_coco_eval_metric(predictor,
             images, annotations = coco_utils.extract_coco_groundtruth(_preds, include_mask)
             coco_dataset = coco_utils.create_coco_format_dataset(images, annotations)
             eval_results = eval_metric.predict_metric_fn(_preds, groundtruth_data=coco_dataset)
-
+        eval_results['val_loss'] = _preds['val_loss']
         return eval_results
 
     # Take into account cuDNN & Tensorflow warmup
@@ -132,6 +135,7 @@ def compute_coco_eval_metric(predictor,
         try:
             step_t0 = time.time()
             step_predictions = six.next(predictor)
+            # print(step_predictions.keys())
             batch_time = time.time() - step_t0
 
             throughput = eval_batch_size / batch_time
@@ -269,6 +273,7 @@ def write_summary(eval_results, summary_dir, current_step, predictions=None):
 
         eval_results_dict = {}
         for metric in eval_results:
+            print(metric)
             try:
                 summaries.append(tf.compat.v1.Summary.Value(tag=metric, simple_value=eval_results[metric]))
                 eval_results_dict[metric] = float(eval_results[metric])

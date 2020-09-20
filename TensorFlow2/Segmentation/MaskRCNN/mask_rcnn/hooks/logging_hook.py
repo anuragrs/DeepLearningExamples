@@ -51,7 +51,7 @@ __all__ = ["AutoLoggingHook"]
 @atexit_hook
 class _AutoLoggingHook(tf.estimator.SessionRunHook):
 
-    def __init__(self, log_every_n_steps=200, warmup_steps=500, is_training=True):
+    def __init__(self, log_every_n_steps=200, warmup_steps=500, is_training=True, summary_dir=None):
         """
         AutoLogging Hook for Tensorflow
 
@@ -59,7 +59,7 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
         :param warmup_steps: integers, numbers of steps considered as warmup
         :param is_training: boolean
         """
-
+        self._summary_writer = None
         self._logging_proxy = LoggingBackend()
 
         self._initialized = False
@@ -84,6 +84,7 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
         self._global_step_tensor = None
 
         self._is_training = is_training
+        self._summary_dir = summary_dir
         self._runtime_mode = RuntimeMode.TRAIN if is_training else RuntimeMode.VALIDATION
 
         self._model_throughput = meters.MovingAverageMeter(window_size=1000)
@@ -278,6 +279,49 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
 
         return tf.estimator.SessionRunArgs(request_fetches)
 
+
+    def _write_summary(self, metrics, summary_dir, current_step):
+        """Write out train metrics."""
+        with tf.Graph().as_default():
+            summaries = []
+            if self._summary_writer is None:
+                # Summary writer writes out training metrics.
+                try:
+                    # Tensorflow 1.x
+                    self._summary_writer = tf.compat.v1.summary.FileWriter(summary_dir)
+                except AttributeError:
+                    # Tensorflow 2.x
+                    self._summary_writer = tf.summary.create_file_writer(summary_dir)
+                    self._summary_writer.as_default()
+
+            for metric_name in metrics:
+                try:
+                    summaries.append(tf.compat.v1.Summary.Value(tag=metric_name, simple_value=metrics[metric_name]))
+                    #eval_results_dict[metric] = float(eval_results[metric])
+
+                except AttributeError:
+                    tf.summary.scalar(name=metric_name, data=metrics[metric_name], step=current_step)
+                    #eval_results_dict[metric] = float(eval_results[metric])
+            #dllogger.log(step=(), data=eval_results_dict, verbosity=Verbosity.DEFAULT)
+
+            #if isinstance(predictions, dict) and predictions:
+            #    images_summary = get_image_summary(predictions, current_step)
+            # 
+            #    try:
+            #        summaries += images_summary
+            #    except TypeError:
+            #        summaries.append(images_summary)
+
+            try:
+                # tf_summaries = tf.compat.v1.Summary(value=list(summaries))
+                tf_summaries = tf.compat.v1.Summary(value=summaries)
+                self._summary_writer.add_summary(tf_summaries, current_step)
+                self._summary_writer.flush()
+
+            except AttributeError:
+                tf.summary.flush(self._summary_writer)
+
+
     def after_run(self, run_context, run_values):  # pylint: disable=unused-argument
         """Called after each call to run().
         The `run_values` argument contains results of requested ops/tensors by
@@ -368,6 +412,9 @@ class _AutoLoggingHook(tf.estimator.SessionRunHook):
             self._logging_proxy.log_metrics(
                 metric_data=metric_data, iteration=self._current_step, runtime_mode=self._runtime_mode
             )
+
+            # write summary
+            self._write_summary(metric_data, self._summary_dir, self._current_step)
 
             print()  # Visual Spacing
 
