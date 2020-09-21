@@ -22,9 +22,100 @@ import re
 import tensorflow as tf
 from tensorflow.python.eager import context
 from tensorflow.python.training import optimizer
-from tensorflow.python.training.training_util import get_global_step
+from tensorflow.python.ops import init_ops
+from tensorflow.python.training import training_ops
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import control_flow_ops
+
+
+
+class NovoGrad(optimizer.Optimizer):
+    def __init__(
+        self,
+        learning_rate = 0.001,
+        beta_1 = 0.9,
+        beta_2 = 0.999,
+        epsilon = 1e-7,
+        weight_decay = 0.0,
+        grad_averaging = False,
+        amsgrad = False,
+        name = "NovoGrad",
+        **kwargs
+    ):
+        super().__init__(False, name, **kwargs)
+        if weight_decay < 0.0:
+            raise ValueError("Weight decay rate cannot be negative")
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.weight_decay = weight_decay
+        self.learning_rate = learning_rate
+        self.epsilon = epsilon or tf.backend_config.epsilon()
+
+        # Tensor versions of the constructor arguments, created in _prepare().
+        self.learning_rate_t = None
+        self.beta_1_t = None
+        self.beta_2_t = None
+        self.epsilon_t = None
+        self.weight_decay_t = None
+
+        self.grad_averaging = grad_averaging
+        self.amsgrad = amsgrad
+
+    def _create_slots(self, var_list):
+        # Create slots for the first and second moments.
+        # Separate for-loops to respect the ordering of slot variables from v1.
+        for var in var_list:
+            self._zeros_slot(var, "m", self._name + "_m")
+        initializer = init_ops.zeros_initializer()
+        for var in var_list:
+            self._get_or_make_slot_with_initializer(var=var, initializer=initializer, shape=tf.TensorShape([]), dtype=var.dtype, slot_name="v", op_name=self._name + "_v")
+        if self.amsgrad:
+            for var in var_list:
+                self.add_slot(var, "vhat")
+
+    def _prepare(self):
+        learning_rate = self._call_if_callable(self.learning_rate)
+        beta_1 = self._call_if_callable(self.beta_1)
+        beta_2 = self._call_if_callable(self.beta_2)
+        epsilon = self._call_if_callable(self.epsilon)
+        weight_decay = self._call_if_callable(self.weight_decay)
+
+        self.learning_rate_t = ops.convert_to_tensor(learning_rate, name="learning_rate")
+        self.beta_1_t = ops.convert_to_tensor(beta_1, name="beta_1")
+        self.beta_2_t = ops.convert_to_tensor(beta_2, name="beta_2")
+        self.epsilon_t = ops.convert_to_tensor(epsilon, name="epsilon")
+        self.weight_decay_t = ops.convert_to_tensor(weight_decay, name="weight_decay")
+
+    def _resource_apply_dense(self, grad, var):
+        m = self.get_slot(var, "m")
+        v = self.get_slot(var, "v")
+        g_2 = tf.reduce_sum(tf.square(tf.cast(grad, tf.float32)))
+        v_t = tf.cond(tf.equal(v, 0),
+                lambda: g_2,
+                lambda: v * self.beta_2_t + g_2 * (1. - self.beta_2_t)
+              )
+        v_t = v.assign(v_t, use_locking=self._use_locking)
+
+        if self.amsgrad:
+            raise NotImplementedError
+        else:
+            grad = grad / (tf.sqrt(v_t) + self.epsilon_t)
+
+        grad = tf.cond(
+            tf.greater(self.weight_decay_t, 0),
+                lambda: grad + self.weight_decay_t * var,
+                lambda: grad
+        )
+
+        if self.grad_averaging:
+            raise NotImplementedError
+        m_t = m * self.beta_1_t + grad
+        m_t = m.assign(m_t, use_locking=self._use_locking)
+        var_update = var - self.learning_rate_t * m_t
+        return var.assign(var_update, use_locking=self._use_locking)
+
+    def _resource_apply_sparse(self, grad, var, indices):
+        raise NotImplementedError
 
 
 class LAMBOptimizer(optimizer.Optimizer):
@@ -100,7 +191,6 @@ class LAMBOptimizer(optimizer.Optimizer):
         self.beta_2_t = None
         self.epsilon_t = None
         self.weight_decay_rate_t = None
-
 
     def _get_beta_accumulators(self):
         with ops.init_scope():

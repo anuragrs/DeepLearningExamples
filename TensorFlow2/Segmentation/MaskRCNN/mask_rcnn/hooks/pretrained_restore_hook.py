@@ -170,7 +170,9 @@ def build_assigment_map(prefix=None, skip_variables_regex=None):
                 var_name[-16:] in "/LARSOptimizer:0" or
                 var_name[-9:] in "/lamb_m:0" or
                 var_name[-9:] in "/lamb_v:0" or
-                var_name[-9:] in "/shadow:0" 
+                var_name[-9:] in "/shadow:0" or
+                var_name[-13:] in "/NovoGrad_m:0" or
+                var_name[-13:] in "/NovoGrad_v:0"
         ):
             continue
 

@@ -26,7 +26,7 @@ procedure.
 import itertools
 
 import tensorflow as tf
-# import tensorflow_addons as tfa
+import tensorflow_addons as tfa
 from mask_rcnn import anchors
 
 from mask_rcnn.models import fpn
@@ -49,7 +49,7 @@ from mask_rcnn.utils.meters import StandardMeter
 from mask_rcnn.utils.metric_tracking import register_metric
 
 from mask_rcnn.utils.lazy_imports import LazyImport
-from .optimization import LAMBOptimizer
+from .optimization import LAMBOptimizer, NovoGrad
 
 hvd = LazyImport("horovod.tensorflow")
 
@@ -122,6 +122,46 @@ def create_lamb_optimizer(learning_rate, params):
 
     return optimizer
 
+
+def create_novograd_optimizer(learning_rate, params):
+    """Creates optimized based on the specified flags."""
+    optimizer = NovoGrad(
+            learning_rate,
+            beta_1=0.9,
+            beta_2=0.98,
+            weight_decay=params['l2_weight_decay'],
+            #TODO:            exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
+    )
+
+
+#    optimizer = tfa.optimizers.NovoGrad(
+#        lr=1e-3,
+#        beta_1=0.9,
+#        beta_2=0.999,
+#        weight_decay=0.001,
+#        grad_averaging=False
+#    )
+
+    if MPI_is_distributed():
+        optimizer = hvd.DistributedOptimizer(
+            optimizer,
+            name=None,
+            device_dense='/gpu:0',
+            device_sparse='',
+            # compression=hvd.Compression.fp16,
+            compression=hvd.Compression.none,
+            sparse_as_dense=False
+        )
+
+    if params["amp"]:
+        loss_scale = tf.train.experimental.DynamicLossScale(
+            initial_loss_scale=(2 ** 11),
+            increment_period=2000,
+            multiplier=2.0
+        )
+        optimizer = tf.compat.v1.train.experimental.MixedPrecisionLossScaleOptimizer(optimizer, loss_scale=loss_scale)
+
+    return optimizer
 
 def compute_model_statistics(batch_size, is_training=True):
     """Compute number of parameters and FLOPS."""
@@ -523,6 +563,8 @@ def _model_fn(features, labels, mode, params):
             optimizer = create_optimizer(learning_rate, params)
         elif params['optimizer_type'] == 'LAMB':
             optimizer = create_lamb_optimizer(learning_rate, params)
+        elif params['optimizer_type'] == 'Novograd':
+            optimizer = create_novograd_optimizer(learning_rate, params)
         else:
             raise NotImplementedError
 
