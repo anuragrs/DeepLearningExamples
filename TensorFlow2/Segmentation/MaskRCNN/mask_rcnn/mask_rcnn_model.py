@@ -128,7 +128,7 @@ def create_novograd_optimizer(learning_rate, params):
     optimizer = NovoGrad(
             learning_rate,
             beta_1=0.9,
-            beta_2=0.98,
+            beta_2=0.8, #0.98,
             weight_decay=params['l2_weight_decay'],
             exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
     )
