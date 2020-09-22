@@ -76,6 +76,10 @@ def cosine_learning_rate_with_linear_warmup(
             alpha=alpha
         )
 
+    lr = learning_rate_fn()
+#    print_op = tf.print("LR --->", lr)
+#    with tf.control_dependencies([print_op]):
+#        lr = tf.identity(lr)
     learning_rate = tf.where(
         global_step < warmup_steps,
         warmup_lr_fn(),

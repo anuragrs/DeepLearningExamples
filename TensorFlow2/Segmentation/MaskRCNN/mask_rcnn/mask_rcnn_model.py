@@ -130,7 +130,7 @@ def create_novograd_optimizer(learning_rate, params):
             beta_1=0.9,
             beta_2=0.98,
             weight_decay=params['l2_weight_decay'],
-            #TODO:            exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
+            exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
     )
 
 
@@ -513,7 +513,7 @@ def _model_fn(features, labels, mode, params):
 
     trainable_variables = list(itertools.chain.from_iterable([model.trainable_variables for model in MODELS.values()]))
 
-    if params['optimizer_type'] == 'LAMB':
+    if params['optimizer_type'] in ['LAMB', 'Novograd']: # decoupled weight decay
         l2_regularization_loss = tf.constant(0.0)
     else:
         l2_regularization_loss = params['l2_weight_decay'] * tf.add_n([
@@ -554,7 +554,7 @@ def _model_fn(features, labels, mode, params):
                 warmup_learning_rate=params['warmup_learning_rate'],
                 warmup_steps=params['warmup_steps'],
                 first_decay_steps=params['total_steps'],
-                alpha=0.01 * params['init_learning_rate']
+                alpha=0.001 * params['init_learning_rate']
             )
         else:
             raise NotImplementedError

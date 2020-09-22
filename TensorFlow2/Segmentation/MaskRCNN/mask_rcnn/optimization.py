@@ -37,6 +37,7 @@ class NovoGrad(optimizer.Optimizer):
         beta_2 = 0.999,
         epsilon = 1e-7,
         weight_decay = 0.0,
+        exclude_from_weight_decay = None,
         grad_averaging = False,
         amsgrad = False,
         name = "NovoGrad",
@@ -50,6 +51,7 @@ class NovoGrad(optimizer.Optimizer):
         self.weight_decay = weight_decay
         self.learning_rate = learning_rate
         self.epsilon = epsilon or tf.backend_config.epsilon()
+        self.exclude_from_weight_decay = exclude_from_weight_decay
 
         # Tensor versions of the constructor arguments, created in _prepare().
         self.learning_rate_t = None
@@ -101,14 +103,21 @@ class NovoGrad(optimizer.Optimizer):
         else:
             grad = grad / (tf.sqrt(v_t) + self.epsilon_t)
 
-        grad = tf.cond(
-            tf.greater(self.weight_decay_t, 0),
-                lambda: grad + self.weight_decay_t * var,
-                lambda: grad
-        )
+        var_name = self._get_variable_name(var.name)
+        if self._do_use_weight_decay(var_name):
+#            print_op = tf.print(var_name, self.weight_decay_t)
+            grad = grad + self.weight_decay_t * var
+#            with tf.control_dependencies([print_op]):
+#                grad = tf.identity(grad)
+#            grad = tf.cond(
+#                tf.greater(self.weight_decay_t, 0),
+#                    lambda: grad + self.weight_decay_t * var,
+#                    lambda: grad
+#            )
 
         if self.grad_averaging:
             raise NotImplementedError
+
         m_t = m * self.beta_1_t + grad
         m_t = m.assign(m_t, use_locking=self._use_locking)
         var_update = var - self.learning_rate_t * m_t
@@ -116,6 +125,22 @@ class NovoGrad(optimizer.Optimizer):
 
     def _resource_apply_sparse(self, grad, var, indices):
         raise NotImplementedError
+
+    def _get_variable_name(self, param_name):
+        """Get the variable name from the tensor name."""
+        m = re.match("^(.*):\\d+$", param_name)
+        if m is not None:
+            param_name = m.group(1)
+        return param_name
+
+    def _do_use_weight_decay(self, param_name):
+        """Whether to use L2 weight decay for `param_name`."""
+        if self.exclude_from_weight_decay:
+            for r in self.exclude_from_weight_decay:
+                if re.search(r, param_name) is not None:
+                    return False
+        return True
+
 
 
 class LAMBOptimizer(optimizer.Optimizer):
