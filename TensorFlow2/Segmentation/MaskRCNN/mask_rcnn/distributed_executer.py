@@ -453,7 +453,7 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
-      MIN_EVAL_EPOCH = 13
+      MIN_EVAL_EPOCH = 10
       if cycle < MIN_EVAL_EPOCH:
           continue
 

@@ -128,7 +128,7 @@ def create_novograd_optimizer(learning_rate, params):
     optimizer = NovoGrad(
             learning_rate,
             beta_1=0.9,
-            beta_2=0.8, #0.98,
+            beta_2=0.5, #0.8, #0.98,
             weight_decay=params['l2_weight_decay'],
             exclude_from_weight_decay=['bias', 'beta', 'batch_normalization']
     )
@@ -554,7 +554,8 @@ def _model_fn(features, labels, mode, params):
                 warmup_learning_rate=params['warmup_learning_rate'],
                 warmup_steps=params['warmup_steps'],
                 first_decay_steps=params['total_steps'],
-                alpha=0.001 * params['init_learning_rate']
+                alpha= 0.01 * params['init_learning_rate']
+                # 0.001 * params['init_learning_rate']
             )
         else:
             raise NotImplementedError
