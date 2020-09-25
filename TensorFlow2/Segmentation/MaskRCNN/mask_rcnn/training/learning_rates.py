@@ -60,7 +60,8 @@ def cosine_learning_rate_with_linear_warmup(
     warmup_learning_rate,
     warmup_steps,
     first_decay_steps,
-    alpha=0.0
+    alpha=0.0,
+    m_mul=1.0
 ):
     """Creates the step learning rate tensor with linear warmup."""
 
@@ -73,7 +74,8 @@ def cosine_learning_rate_with_linear_warmup(
             init_learning_rate,
             global_step,
             first_decay_steps,
-            alpha=alpha
+            alpha=alpha,
+            m_mul=m_mul
         )
 
     lr = learning_rate_fn()

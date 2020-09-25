@@ -37,7 +37,7 @@ else:
 def _l1_loss(y_true, y_pred, weights, delta=0.0):
     l1_loss = tf.compat.v1.losses.absolute_difference(y_true, y_pred, weights=weights)
     assert l1_loss.dtype == tf.float32
-    DEBUG_LOSS_IMPLEMENTATION = True
+    DEBUG_LOSS_IMPLEMENTATION = False
     if DEBUG_LOSS_IMPLEMENTATION:
         mlperf_loss = tf.compat.v1.losses.huber_loss(
             y_true,
