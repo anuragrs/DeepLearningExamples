@@ -61,8 +61,8 @@ def get_training_hooks(mode, runtime_config): # model_dir, checkpoint_path=None,
             log_every_n_steps=5,
             #log_every_n_steps=5 if "NGC_JOB_ID" not in os.environ else 100,
             warmup_steps=runtime_config.warmup_steps,
-            #warmup_steps=100,
-            is_training=True
+            is_training=True,
+            summary_dir=model_dir
         )
     ]
 
@@ -420,6 +420,12 @@ class BaseExecuter(object):
     pending_eval_threads = []
     for cycle in range(1, num_cycles + 1):
 
+##      workaround if seed is set manually at cmdline        
+##      train_run_config = self.build_strategy_configuration('train', cycle)
+##      train_params = self.build_model_parameters('train')
+##      train_estimator = self.build_mask_rcnn_estimator(train_params, train_run_config, 'train')
+
+
       if not MPI_is_distributed() or MPI_rank() == 0:
 
         print()  # Visual Spacing
@@ -453,7 +459,7 @@ class BaseExecuter(object):
               max_steps=max_cycle_step,
               hooks=training_hooks,
           )
-      MIN_EVAL_EPOCH = 10
+      MIN_EVAL_EPOCH = 0 #10
       if cycle < MIN_EVAL_EPOCH:
           continue
 
@@ -587,14 +593,14 @@ class EstimatorExecuter(BaseExecuter):
 
     os.environ['TF_SYNC_ON_FINISH'] = '0'
 
-  def build_strategy_configuration(self, mode):
+  def build_strategy_configuration(self, mode, seed_offset=0):
     """Retrieves model configuration for running TF Estimator."""
 
     run_config = tf.estimator.RunConfig(
         tf_random_seed=(
             self._runtime_config.seed
             if not MPI_is_distributed() or self._runtime_config.seed is None else
-            self._runtime_config.seed + MPI_rank()
+            self._runtime_config.seed + MPI_rank() + seed_offset
         ),
         model_dir=self._runtime_config.model_dir,
         save_summary_steps=None,  # disabled

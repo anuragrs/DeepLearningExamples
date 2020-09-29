@@ -90,7 +90,7 @@ def define_hparams_flags():
     flags.DEFINE_float("l2_weight_decay", default=1e-4, help="l2 regularization weight")
 
     flags.DEFINE_string('mode', default='train_and_eval', help='Mode to run: train or eval')
-    flags.DEFINE_string('optimizer_type', default='SGD', help='Optimizer to use - SGD or LAMB')
+    flags.DEFINE_string('optimizer_type', default='SGD', help='Optimizer to use - SGD or LAMB or Novograd')
     flags.DEFINE_string('lr_schedule', default='piecewise', help='Learning rate schedule - piecewise or cosine')
 
     flags.DEFINE_string(
@@ -100,6 +100,8 @@ def define_hparams_flags():
     )
 
     flags.DEFINE_float("momentum", default=0.9, help="Optimizer Momentum")
+    flags.DEFINE_float("beta1", default=0.9, help="novograd b1")
+    flags.DEFINE_float("beta2", default=0.4, help="novograd b2")
 
     flags.DEFINE_integer('num_steps_per_eval', default=2500, help='Number of steps per evaluation epoch.')
 

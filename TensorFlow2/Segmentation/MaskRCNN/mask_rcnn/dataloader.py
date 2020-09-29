@@ -82,6 +82,7 @@ class InputReader(object):
         except (KeyError, TypeError):
             seed = None
 
+        logging.info("[dataloader] Using seed {}".format(seed))
         if MPI_is_distributed():
             n_gpus = MPI_size()
 
