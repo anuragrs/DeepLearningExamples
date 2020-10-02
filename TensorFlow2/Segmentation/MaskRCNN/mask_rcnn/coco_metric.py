@@ -73,7 +73,7 @@ class MaskCOCO(COCO):
                           type(dataset))
     self.anns, self.cats, self.imgs = dict(), dict(), dict()
     self.dataset = copy.deepcopy(dataset)
-    self.createIndex(use_ext=True)
+    self.createIndex(use_ext=False)
 
   def loadRes(self, detection_results, include_mask, is_image_mask=False):
     """Load result file and return a result api object.
