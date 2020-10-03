@@ -21,6 +21,9 @@ import tensorflow as tf
 
 from mask_rcnn.object_detection import preprocessor
 
+def add_noise(image, std=0.05):
+    noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=std, dtype=image.dtype)
+    return image + noise
 
 def normalize_image(image):
     """Normalize the image.
