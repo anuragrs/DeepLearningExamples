@@ -848,7 +848,7 @@ class TapeModel(object):
         eval_params = dict(self.params.values(), batch_size=self.params.eval_batch_size)
         self.eval_tdf = iter(eval_input_fn(eval_params).repeat()) \
                             if eval_input_fn else None
-        self.optimizer, self.schedule = self.get_optimizer()
+        self.optimizer, self.schedule = self.get_optimizer(phase1_steps=3696*6, averaging_interval=3696)
         self.epoch_num = 0
 
     def load_weights(self):
@@ -856,7 +856,7 @@ class TapeModel(object):
         weights = [chkp.get_tensor(i) for i in eager_mapping.resnet_vars]
         self.forward.layers[0].set_weights(weights)
         
-    def get_optimizer(self):
+    def get_optimizer(self, phase1_steps=0, averaging_interval=0):
         if self.params.lr_schedule=='piecewise':
             schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(self.params.learning_rate_steps,
                                                                             [self.params.init_learning_rate] + \
@@ -867,23 +867,22 @@ class TapeModel(object):
                                                          alpha=0.001)
         else:
             raise NotImplementedError
-#        schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
-#                                                    self.params.warmup_steps)
-
-##        swa_steps = 3696*8
-        phase1_steps = 3696 * 6
-        averaging_interval = 3696
-        main_schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
+        if phase1_steps == 0:
+            # use non SWA schedule
+            schedule = warmup_scheduler.WarmupScheduler(schedule, self.params.warmup_learning_rate,
+                                                        self.params.warmup_steps)
+        else:
+            main_schedule = tf.keras.experimental.CosineDecay(self.params.init_learning_rate,
                                                          phase1_steps + 2 * averaging_interval,
                                                          alpha=0.001)
 
-        averaging_schedule = tf.keras.optimizers.schedules.PolynomialDecay(self.params.init_learning_rate * 0.3,
+            averaging_schedule = tf.keras.optimizers.schedules.PolynomialDecay(self.params.init_learning_rate * 0.6,
                                                                             averaging_interval,
                                                                             end_learning_rate=0.0,
                                                                             power=1.0,
                                                                             cycle=True)
      
-        schedule = warmup_scheduler.SWAScheduler(main_schedule, averaging_schedule, self.params.warmup_learning_rate, self.params.warmup_steps, phase1_steps, self.params.init_learning_rate * 0.01)
+            schedule = warmup_scheduler.SWAScheduler(main_schedule, averaging_schedule, self.params.warmup_learning_rate, self.params.warmup_steps, phase1_steps, self.params.init_learning_rate * 0.01)
         if self.params.optimizer_type=="SGD":
             opt = tf.keras.optimizers.SGD(learning_rate=schedule, 
                                           momentum=self.params.momentum)
@@ -1091,7 +1090,7 @@ class TapeModel(object):
         model_outputs = self.forward(features, labels, self.params.values(), True)
         self.load_weights()
     
-    def train_epoch(self, steps, broadcast=False, profile=None):
+    def train_epoch(self, steps, broadcast=False, profile=None, phase=1):
         if MPI_rank(is_herring())==0:
             logging.info("Starting training loop")
             p_bar = tqdm(range(steps), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -1130,7 +1129,6 @@ class TapeModel(object):
             PHASE1_END_STEP = 3696
             PHASE2_END_STEP = PHASE1_END_STEP + 3696 # 118272 // 4 * 8
             for i in p_bar:
-
                 if i == 5 and self.epoch_num == 0:
                     st = time.time()
                 if broadcast and i==0:
@@ -1144,15 +1142,19 @@ class TapeModel(object):
                 features, labels = next(self.train_tdf)
                 b_w = tf.convert_to_tensor(b_w)
                 b_o = tf.convert_to_tensor(b_o)
-                if i < PHASE1_END_STEP:
-                    loss_dict = self.train_step_phase1(features, labels, b_w, b_o)
+                if phase == 1:
+                     loss_dict = self.train_step_phase1(features, labels, b_w, b_o)
                 else:
-                    loss_dict = self.train_step_phase2(features, labels, b_w, b_o)
-                if i == PHASE2_END_STEP:
+                     loss_dict = self.train_step_phase2(features, labels, b_w, b_o)
+                if phase == 2 and i == steps-1:
                     _ = hvd.allreduce(tf.constant(0.0)) # barrier
                     print("AVERAGING WEIGHTS")
-                    for v in self.forward.variables:
+                    for i, v in enumerate(self.forward.variables):
+                        if i == 0:
+                            tf.print('BEFORE:', v[0,0,0,:])
                         v.assign(hvd.allreduce(v)) # op is None so defaults to average - can we do allreduce on a list of tensors??
+                        if i == 0:
+                            tf.print('AFTER:', v[0,0,0,:])
 
                 times.append(time.perf_counter()-tstart)
                 #nvtx.pop(step_token)
@@ -1160,7 +1162,7 @@ class TapeModel(object):
                     loss_history.append(loss_dict['total_loss'].numpy())
                     step = self.optimizer.iterations
                     learning_rate = self.schedule(step)
-                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.4f}".format(mean(loss_history[-50:]), 
+                    p_bar.set_description("Loss: {0:.4f}, LR: {1:.8f}".format(mean(loss_history[-50:]), 
                                                                             learning_rate))
             
         logging.info(f"Rank={MPI_rank()} Avg step time {np.mean(times[10:])*1000.} +/- {np.std(times[10:])*1000.} ms")
@@ -1172,7 +1174,8 @@ class TapeModel(object):
             print("Saving checkpoint...")
             self.epoch_num+=1
             self.save_model()
-            
+
+
     def get_latest_checkpoint(self):
         try:
             return sorted([_ for _ in os.listdir(self.model_dir) if _.endswith(".h5")])[-1]
